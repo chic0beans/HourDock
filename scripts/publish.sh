@@ -10,9 +10,9 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 GITHUB_USER="chic0beans"
-GITHUB_REPO="SteamIdleMac"
+GITHUB_REPO="HourDock"
 GITHUB_RELEASES_URL="https://github.com/${GITHUB_USER}/${GITHUB_REPO}/releases"
-GITHUB_LATEST_DMG_URL="https://github.com/${GITHUB_USER}/${GITHUB_REPO}/releases/latest/download/SteamIdleMac.dmg"
+GITHUB_LATEST_DMG_URL="https://github.com/${GITHUB_USER}/${GITHUB_REPO}/releases/latest/download/HourDock.dmg"
 SU_FEED_URL="https://github.com/${GITHUB_USER}/${GITHUB_REPO}/releases/latest/download/appcast.xml"
 
 VERSION="${1:-1.0.4}"
@@ -46,8 +46,8 @@ echo ""
 bash "$ROOT/scripts/build-app.sh"
 bash "$ROOT/scripts/make-dmg.sh"
 
-DMG_VERSIONED="$ROOT/build/SteamIdleMac-${VERSION}.dmg"
-DMG_LATEST="$ROOT/build/SteamIdleMac.dmg"
+DMG_VERSIONED="$ROOT/build/HourDock-${VERSION}.dmg"
+DMG_LATEST="$ROOT/build/HourDock.dmg"
 
 if [ ! -f "$DMG_VERSIONED" ]; then
     echo "Error: DMG not found at $DMG_VERSIONED"
@@ -96,7 +96,7 @@ else
     [ -n "$APPCAST" ] && FILES+=("$APPCAST")
     gh release create "$TAG" \
         --title "HourDock ${VERSION}" \
-        --notes "Download SteamIdleMac.dmg, open it, drag the app to Applications. First launch: right-click -> Open." \
+        --notes "Download HourDock.dmg, open it, drag the app to Applications. First launch: right-click -> Open." \
         "${FILES[@]}"
 fi
 

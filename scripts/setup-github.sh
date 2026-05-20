@@ -8,7 +8,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 GITHUB_USER="chic0beans"
-GITHUB_REPO="SteamIdleMac"
+GITHUB_REPO="HourDock"
 REMOTE="https://github.com/${GITHUB_USER}/${GITHUB_REPO}.git"
 
 bash "$ROOT/scripts/install-tools.sh"

@@ -9,7 +9,7 @@ if [ -z "${SU_FEED_URL:-}" ] && [ -f "$ROOT/scripts/github-config.sh" ]; then
     # shellcheck source=/dev/null
     source "$ROOT/scripts/github-config.sh"
 fi
-SU_FEED_URL="${SU_FEED_URL:-https://github.com/chic0beans/SteamIdleMac/releases/latest/download/appcast.xml}"
+SU_FEED_URL="${SU_FEED_URL:-https://github.com/chic0beans/HourDock/releases/latest/download/appcast.xml}"
 SU_PUBLIC_ED_KEY="${SU_PUBLIC_ED_KEY:-}"
 
 VERSION="${SIM_VERSION:-1.0.4}"
@@ -31,7 +31,7 @@ echo "==> Building Swift app"
 cd "$ROOT"
 swift build -c release
 
-APP="$ROOT/build/SteamIdleMac.app"
+APP="$ROOT/build/HourDock.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS"
 mkdir -p "$APP/Contents/Resources"

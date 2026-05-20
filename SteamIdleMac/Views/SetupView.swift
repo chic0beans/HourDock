@@ -18,7 +18,7 @@ struct SetupView: View {
                 .frame(maxWidth: 420)
 
             Button("Open Settings") {
-                appState.showSettings = true
+                appState.openSettingsWindow()
             }
             .buttonStyle(.borderedProminent)
         }

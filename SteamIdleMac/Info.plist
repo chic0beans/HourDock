@@ -27,7 +27,7 @@
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
 	<key>SUFeedURL</key>
-	<string>https://github.com/your-user/SteamIdleMac/releases/download/latest/appcast.xml</string>
+	<string>https://github.com/your-user/HourDock/releases/download/latest/appcast.xml</string>
 	<key>SUPublicEDKey</key>
 	<string></string>
 	<key>SUEnableInstallerLauncherService</key>

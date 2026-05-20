@@ -85,6 +85,9 @@ struct MenuBarDashboard: View {
                 }
             }
             if !appState.idleManager.activeSessions.isEmpty {
+                menuButton("Regrid banners") {
+                    NotificationCenter.default.post(name: .regridIdleBanners, object: nil)
+                }
                 menuButton("Stop all") { appState.stopAllIdling() }
             }
             menuButton("Check for updates...") { updater.checkForUpdates() }

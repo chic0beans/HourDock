@@ -33,5 +33,5 @@ brew install create-dmg
 
 echo ""
 echo "Done! Open a NEW Terminal window, then run:"
-echo "  cd ~/Documents/SteamIdleMac"
+echo "  cd ~/Documents/HourDock"
 echo "  bash scripts/publish.sh"

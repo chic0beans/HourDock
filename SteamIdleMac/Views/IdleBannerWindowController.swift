@@ -64,14 +64,22 @@ final class IdleBannerWindowController: NSWindowController, NSWindowDelegate {
         panel.backgroundColor = .clear
         panel.isOpaque = false
         panel.setAccessibilityTitle("Idling \(game.name)")
+        panel.standardWindowButton(.closeButton)?.isHidden = true
+        panel.standardWindowButton(.miniaturizeButton)?.isHidden = true
+        panel.standardWindowButton(.zoomButton)?.isHidden = true
 
         super.init(window: panel)
         panel.delegate = self
 
         let root = IdleBannerView(game: game, style: style)
+        let container = BannerContainerView(frame: NSRect(origin: .zero, size: size)) { [weak self] in
+            self?.close()
+        }
         let hosting = NSHostingView(rootView: root)
-        hosting.frame = NSRect(origin: .zero, size: size)
-        panel.contentView = hosting
+        hosting.frame = container.bounds
+        hosting.autoresizingMask = [.width, .height]
+        container.addSubview(hosting)
+        panel.contentView = container
         panel.setFrame(NSRect(origin: origin, size: size), display: false)
     }
 
@@ -111,6 +119,30 @@ final class IdleBannerWindowController: NSWindowController, NSWindowDelegate {
         didHandleStop = true
         onStop()
     }
+}
+
+private final class BannerContainerView: NSView {
+    private let onRightClick: () -> Void
+
+    init(frame frameRect: NSRect, onRightClick: @escaping () -> Void) {
+        self.onRightClick = onRightClick
+        super.init(frame: frameRect)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        window?.performDrag(with: event)
+    }
+
+    override func rightMouseDown(with event: NSEvent) {
+        onRightClick()
+    }
+
+    override func menu(for event: NSEvent) -> NSMenu? { nil }
 }
 
 struct IdleBannerView: View {
@@ -278,6 +310,11 @@ final class IdleBannerWindowManager: ObservableObject {
         controllers.removeAll()
         sessionOrder.removeAll()
         currentStyle = nil
+    }
+
+    func regrid() {
+        guard let style = currentStyle else { return }
+        relayoutAll(style: style)
     }
 
     private func relayoutAll(style: BannerStyle) {

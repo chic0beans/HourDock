@@ -30,6 +30,12 @@ struct SteamIdleMacApp: App {
         }
         .commands {
             CommandGroup(replacing: .newItem) {}
+            CommandGroup(replacing: .appSettings) {
+                Button("Settings...") {
+                    appState.openSettingsWindow()
+                }
+                .keyboardShortcut(",", modifiers: [.command])
+            }
             CommandGroup(after: .appInfo) {
                 Button("Check for Updates...") { updater.checkForUpdates() }
                     .disabled(!updater.canCheck)

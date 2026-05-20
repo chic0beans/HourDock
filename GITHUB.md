@@ -2,7 +2,7 @@
 
 Your username: **chic0beans**
 
-Download page: **https://github.com/chic0beans/SteamIdleMac/releases**
+Download page: **https://github.com/chic0beans/HourDock/releases**
 
 ---
 
@@ -15,7 +15,7 @@ If Terminal says `command not found: brew`, use these commands instead.
 ## Step 1 — Install GitHub CLI (no Homebrew)
 
 ```bash
-cd ~/Documents/SteamIdleMac
+cd ~/Documents/HourDock
 bash scripts/install-tools.sh
 ```
 
@@ -32,18 +32,18 @@ Pick **GitHub.com** → **HTTPS** → login with a **web browser**.
 ## Step 2 — Push project to GitHub (one-time)
 
 ```bash
-cd ~/Documents/SteamIdleMac
+cd ~/Documents/HourDock
 bash scripts/setup-github.sh
 ```
 
-Share this link: **https://github.com/chic0beans/SteamIdleMac/releases**
+Share this link: **https://github.com/chic0beans/HourDock/releases**
 
 ---
 
 ## What happens when you publish
 
 1. Opens the link above
-2. Downloads **SteamIdleMac.dmg**
+2. Downloads **HourDock.dmg**
 3. Drags the app to Applications
 4. First open: right-click → Open (Gatekeeper)
 

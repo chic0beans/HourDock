@@ -1,5 +1,5 @@
 #!/bin/bash
-APP="$(cd "$(dirname "$0")" && pwd)/build/SteamIdleMac.app"
+APP="$(cd "$(dirname "$0")" && pwd)/build/HourDock.app"
 if [[ ! -d "$APP" ]]; then
   osascript -e 'display alert "HourDock" message "App not found. Build it first with: bash scripts/build-app.sh"'
   exit 1

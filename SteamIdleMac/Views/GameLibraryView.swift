@@ -211,7 +211,7 @@ struct GameLibraryView: View {
             }
 
             Button {
-                appState.showSettings = true
+                appState.openSettingsWindow()
             } label: {
                 Image(systemName: "gearshape.fill")
             }

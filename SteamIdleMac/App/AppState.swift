@@ -146,6 +146,10 @@ final class AppState: ObservableObject {
         onboardingCompleted = false
     }
 
+    func openSettingsWindow() {
+        showSettings = true
+    }
+
     func detectSteamIDFromActiveAccount() {
         do {
             steamID64 = try pathService.detectSteamID64()

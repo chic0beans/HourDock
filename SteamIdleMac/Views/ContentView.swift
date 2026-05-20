@@ -3,6 +3,7 @@ import AppKit
 
 extension Notification.Name {
     static let steamIdleAppWillTerminate = Notification.Name("com.steamidlemac.app.willTerminate")
+    static let regridIdleBanners = Notification.Name("com.steamidlemac.app.regridIdleBanners")
 }
 
 struct ContentView: View {
@@ -50,6 +51,9 @@ struct ContentView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .steamIdleAppWillTerminate)) { _ in
             bannerManager.closeAll()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .regridIdleBanners)) { _ in
+            bannerManager.regrid()
         }
     }
 

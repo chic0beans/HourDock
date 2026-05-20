@@ -7,6 +7,7 @@ struct SettingsView: View {
     @State private var saveError: String?
     @State private var isRefreshing = false
     @State private var animateBackdrop = false
+    @State private var isAPIKeyLocked = true
     @State private var isSteamIDLocked = true
     @FocusState private var apiKeyFocused: Bool
 
@@ -44,9 +45,37 @@ struct SettingsView: View {
                     VStack(spacing: 14) {
                         settingsCard(title: "Steam Web API", subtitle: "Saved securely in Keychain") {
                             VStack(alignment: .leading, spacing: 10) {
-                                SecureField("API Key", text: $appState.apiKey)
-                                    .focused($apiKeyFocused)
-                                    .styledGlassInput()
+                                HStack(spacing: 8) {
+                                    SecureField("API Key", text: $appState.apiKey)
+                                        .focused($apiKeyFocused)
+                                        .styledGlassInput(
+                                            dimmed: isAPIKeyLocked,
+                                            accent: isAPIKeyLocked ? .secondary : .accentColor
+                                        )
+                                        .disabled(isAPIKeyLocked)
+
+                                    Button {
+                                        withAnimation(.easeInOut(duration: 0.2)) {
+                                            isAPIKeyLocked.toggle()
+                                        }
+                                        if isAPIKeyLocked {
+                                            apiKeyFocused = false
+                                        }
+                                    } label: {
+                                        ZStack {
+                                            Circle()
+                                                .fill(isAPIKeyLocked ? Color.white.opacity(0.10) : Color.accentColor.opacity(0.24))
+                                            Image(systemName: isAPIKeyLocked ? "lock.fill" : "lock.open.fill")
+                                                .font(.system(size: 12, weight: .semibold))
+                                                .foregroundStyle(isAPIKeyLocked ? Color.white.opacity(0.92) : Color.accentColor)
+                                                .transition(.opacity.combined(with: .scale))
+                                        }
+                                        .frame(width: 24, height: 24)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .contentShape(Circle())
+                                    .help(isAPIKeyLocked ? "Unlock API key editing" : "Lock API key field")
+                                }
 
                                 HStack {
                                     if let url = AppLinks.steamAPIKey {
@@ -76,31 +105,26 @@ struct SettingsView: View {
                                         .disabled(isSteamIDLocked)
 
                                     Button {
-                                        withAnimation(.easeInOut(duration: 0.18)) {
+                                        withAnimation(.easeInOut(duration: 0.2)) {
                                             isSteamIDLocked.toggle()
                                         }
                                         if isSteamIDLocked {
                                             appState.detectSteamIDFromActiveAccount()
                                         }
                                     } label: {
-                                        Label(
-                                            isSteamIDLocked ? "Locked" : "Unlocked",
-                                            systemImage: isSteamIDLocked ? "lock.fill" : "lock.open.fill"
-                                        )
-                                        .font(.caption.weight(.semibold))
-                                        .padding(.horizontal, 10)
-                                        .padding(.vertical, 8)
-                                        .background(
-                                            Capsule()
-                                                .fill(isSteamIDLocked ? Color.white.opacity(0.10) : Color.accentColor.opacity(0.25))
-                                        )
-                                        .overlay(
-                                            Capsule()
-                                                .stroke(isSteamIDLocked ? Color.white.opacity(0.26) : Color.accentColor.opacity(0.55), lineWidth: 1)
-                                        )
+                                        ZStack {
+                                            Circle()
+                                                .fill(isSteamIDLocked ? Color.white.opacity(0.10) : Color.accentColor.opacity(0.24))
+                                            Image(systemName: isSteamIDLocked ? "lock.fill" : "lock.open.fill")
+                                                .font(.system(size: 12, weight: .semibold))
+                                                .foregroundStyle(isSteamIDLocked ? Color.white.opacity(0.92) : Color.accentColor)
+                                                .transition(.opacity.combined(with: .scale))
+                                        }
+                                        .frame(width: 24, height: 24)
                                     }
                                     .buttonStyle(.plain)
-                                    .help(isSteamIDLocked ? "Unlock to edit SteamID manually" : "Lock to use the detected active Steam account")
+                                    .contentShape(Circle())
+                                    .help(isSteamIDLocked ? "Unlock SteamID editing" : "Lock to active Steam account")
                                 }
                                 Text("Leave empty to auto-detect from Steam loginusers.vdf.")
                                     .font(.caption)
@@ -190,6 +214,7 @@ struct SettingsView: View {
         .frame(minWidth: 560, idealWidth: 620, minHeight: 560)
         .onAppear {
             appState.detectSteamIDFromActiveAccount()
+            apiKeyFocused = false
             withAnimation(.easeInOut(duration: 8).repeatForever(autoreverses: true)) {
                 animateBackdrop = true
             }

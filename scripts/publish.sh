@@ -70,13 +70,19 @@ APPCAST=""
 if [ -n "${SPARKLE_PRIVATE_KEY:-}" ]; then
     UPDATES_DIR="$ROOT/build/updates"
     mkdir -p "$UPDATES_DIR"
+    rm -f "$UPDATES_DIR/"*.dmg "$UPDATES_DIR/appcast.xml"
     cp "$DMG_VERSIONED" "$UPDATES_DIR/"
     SPARKLE_DIR=$(sparkle_bin_dir || true)
     GEN_TOOL=""
     [ -n "$SPARKLE_DIR" ] && GEN_TOOL="$SPARKLE_DIR/generate_appcast"
     if [ -n "$GEN_TOOL" ] && [ -x "$GEN_TOOL" ]; then
-        "$GEN_TOOL" --private-eddsa-key "$SPARKLE_PRIVATE_KEY" "$UPDATES_DIR" 2>/dev/null || true
-        [ -f "$UPDATES_DIR/appcast.xml" ] && APPCAST="$UPDATES_DIR/appcast.xml"
+        printf "%s" "$SPARKLE_PRIVATE_KEY" | "$GEN_TOOL" --ed-key-file - "$UPDATES_DIR"
+        if [ -f "$UPDATES_DIR/appcast.xml" ]; then
+            APPCAST="$UPDATES_DIR/appcast.xml"
+        else
+            echo "Error: appcast generation failed."
+            exit 1
+        fi
     fi
 fi
 

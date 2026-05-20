@@ -16,7 +16,14 @@ enum BannerStyle: String, CaseIterable, Identifiable, Codable {
     var windowSize: CGSize {
         switch self {
         case .landscape: return CGSize(width: 460, height: 248)
-        case .icon: return CGSize(width: 200, height: 240)
+        case .icon: return CGSize(width: 88, height: 100)
+        }
+    }
+
+    var iconArtworkSize: CGFloat {
+        switch self {
+        case .landscape: return 0
+        case .icon: return 56
         }
     }
 }

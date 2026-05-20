@@ -16,15 +16,6 @@ struct ContentView: View {
             }
         }
         .frame(minWidth: 900, minHeight: 620)
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    appState.showSettings = true
-                } label: {
-                    Image(systemName: "gearshape")
-                }
-            }
-        }
         .sheet(isPresented: $appState.showSettings) {
             SettingsView()
                 .environmentObject(appState)
@@ -37,8 +28,7 @@ struct ContentView: View {
         } message: {
             Text(appState.errorMessage ?? "")
         }
-        .onAppear { applyAlwaysOnTop() }
-        .onChange(of: appState.keepWindowAboveBanners) { _ in applyAlwaysOnTop() }
+        .onAppear { configureWindowLevels() }
         .onChange(of: appState.bannerStyle) { _ in resyncBanners() }
         .onChange(of: appState.idleManager.activeSessions.map(\.appid)) { _ in
             resyncBanners()
@@ -55,19 +45,19 @@ struct ContentView: View {
             games: appState.games,
             style: appState.bannerStyle
         ) { appid in
-            appState.idleManager.stopIdle(appid: appid)
+            appState.stopIdle(appid: appid)
         }
-        applyAlwaysOnTop()
+        configureWindowLevels()
     }
 
-    private func applyAlwaysOnTop() {
-        let elevated = NSWindow.Level(rawValue: NSWindow.Level.floating.rawValue + 1)
+    /// Main window stays above idle banners without floating over other apps.
+    private func configureWindowLevels() {
         for window in NSApp.windows {
-            // Skip panels (banners) and the menubar window.
-            guard window.contentViewController != nil,
-                  !(window is NSPanel) else { continue }
-            window.level = appState.keepWindowAboveBanners ? elevated : .normal
-            window.collectionBehavior.insert(.canJoinAllSpaces)
+            if window is NSPanel {
+                window.level = NSWindow.Level(rawValue: NSWindow.Level.normal.rawValue - 1)
+            } else if window.contentView != nil {
+                window.level = .normal
+            }
         }
     }
 }

@@ -75,7 +75,7 @@ struct MenuBarDashboard: View {
                 }
             }
             if !appState.idleManager.activeSessions.isEmpty {
-                menuButton("Stop all") { appState.idleManager.stopAll() }
+                menuButton("Stop all") { appState.stopAllIdling() }
             }
             menuButton("Check for updates...") { updater.checkForUpdates() }
                 .disabled(!updater.canCheck)
@@ -112,7 +112,7 @@ private struct DashboardRow: View {
         HStack(spacing: 10) {
             iconView
                 .frame(width: 32, height: 32)
-                .cornerRadius(4)
+                .cornerRadius(6)
                 .clipped()
 
             VStack(alignment: .leading, spacing: 2) {
@@ -128,15 +128,18 @@ private struct DashboardRow: View {
 
             Button(role: .destructive, action: onStop) {
                 Image(systemName: "stop.circle.fill")
+                    .font(.title3)
             }
             .buttonStyle(.borderless)
+            .foregroundStyle(.red)
+            .opacity(hovering ? 1 : 0.6)
             .help("Stop \(game?.name ?? session.name)")
         }
-        .padding(.horizontal, 6)
-        .padding(.vertical, 4)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
         .background(
             RoundedRectangle(cornerRadius: 6)
-                .fill(hovering ? Color.secondary.opacity(0.15) : .clear)
+                .fill(hovering ? Color.secondary.opacity(0.15) : Color.clear)
         )
         .onHover { hovering = $0 }
     }

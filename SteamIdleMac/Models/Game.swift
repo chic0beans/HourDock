@@ -17,7 +17,6 @@ struct Game: Identifiable, Codable, Hashable {
         URL(string: "https://cdn.cloudflare.steamstatic.com/steam/apps/\(appid)/header.jpg")!
     }
 
-    /// Steam community-style game icon (small square logo). Returns nil when API didn't provide a hash.
     var iconImageURL: URL? {
         guard let hash = imgIconURL, !hash.isEmpty else {
             return URL(string: "https://cdn.cloudflare.steamstatic.com/steam/apps/\(appid)/capsule_184x69.jpg")
@@ -25,7 +24,11 @@ struct Game: Identifiable, Codable, Hashable {
         return URL(string: "https://media.steampowered.com/steamcommunity/public/images/apps/\(appid)/\(hash).jpg")
     }
 
-    /// Square library/capsule artwork as a fallback for icon style.
+    /// Prefer higher-res art for widgets and compact banners (scaled down).
+    var widgetIconURL: URL {
+        URL(string: "https://cdn.cloudflare.steamstatic.com/steam/apps/\(appid)/logo.png")!
+    }
+
     var capsuleImageURL: URL {
         URL(string: "https://cdn.cloudflare.steamstatic.com/steam/apps/\(appid)/library_600x900.jpg")!
     }

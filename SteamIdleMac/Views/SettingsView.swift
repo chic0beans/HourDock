@@ -8,6 +8,13 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
+            Section("General") {
+                Button("Show setup again") {
+                    appState.resetOnboarding()
+                    dismiss()
+                }
+            }
+
             Section("Steam Web API") {
                 SecureField("API Key", text: $appState.apiKey)
                 Link("Get an API key", destination: URL(string: "https://steamcommunity.com/dev/apikey")!)
@@ -30,7 +37,6 @@ struct SettingsView: View {
                         Text(style.displayName).tag(style)
                     }
                 }
-                Toggle("Keep main window above idle banners", isOn: $appState.keepWindowAboveBanners)
             }
 
             if let saveError {

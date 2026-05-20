@@ -4,6 +4,12 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
+if [ -x /opt/homebrew/bin/brew ]; then
+    eval "$(/opt/homebrew/bin/brew shellenv)"
+elif [ -x /usr/local/bin/brew ]; then
+    eval "$(/usr/local/bin/brew shellenv)"
+fi
+
 APP="$ROOT/build/SteamIdleMac.app"
 if [ ! -d "$APP" ]; then
     echo "Building app first..."
@@ -16,13 +22,23 @@ DMG_PATH="$OUT_DIR/SteamIdleMac-${VERSION}.dmg"
 mkdir -p "$OUT_DIR"
 rm -f "$DMG_PATH"
 
+make_dmg_hdiutil() {
+    echo "==> Creating DMG with hdiutil..."
+    STAGE=$(mktemp -d)
+    cp -R "$APP" "$STAGE/SteamIdleMac.app"
+    ln -s /Applications "$STAGE/Applications"
+    hdiutil create -volname "Steam Idle Mac ${VERSION}" -srcfolder "$STAGE" -ov -format UDZO "$DMG_PATH" >/dev/null
+    rm -rf "$STAGE"
+}
+
 if ! command -v create-dmg >/dev/null 2>&1; then
-    echo "Installing create-dmg..."
     if command -v brew >/dev/null 2>&1; then
+        echo "==> Installing create-dmg..."
         brew install create-dmg
     else
-        echo "create-dmg not found. Install from: https://github.com/create-dmg/create-dmg"
-        exit 1
+        make_dmg_hdiutil
+        echo "Built: $DMG_PATH"
+        exit 0
     fi
 fi
 
@@ -31,19 +47,21 @@ if [ ! -f "$BG_PNG" ]; then
     swift "$ROOT/scripts/generate-dmg-background.swift" "$BG_PNG" 2>/dev/null || true
 fi
 
-EXTRA=()
-[ -f "$BG_PNG" ] && EXTRA+=(--background "$BG_PNG")
+echo "==> Creating DMG with create-dmg..."
+DMG_ARGS=(
+    --volname "Steam Idle Mac ${VERSION}"
+    --window-pos 200 120
+    --window-size 640 400
+    --icon-size 128
+    --icon "SteamIdleMac.app" 160 200
+    --app-drop-link 480 200
+    --hide-extension "SteamIdleMac.app"
+)
+if [ -f "$BG_PNG" ]; then
+    DMG_ARGS+=(--background "$BG_PNG")
+fi
+DMG_ARGS+=("$DMG_PATH" "$APP")
 
-create-dmg \
-    --volname "Steam Idle Mac ${VERSION}" \
-    --window-pos 200 120 \
-    --window-size 640 400 \
-    --icon-size 128 \
-    --icon "SteamIdleMac.app" 160 200 \
-    --app-drop-link 480 200 \
-    --hide-extension "SteamIdleMac.app" \
-    "${EXTRA[@]}" \
-    "$DMG_PATH" \
-    "$APP"
+create-dmg "${DMG_ARGS[@]}"
 
 echo "Built: $DMG_PATH"

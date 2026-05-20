@@ -72,6 +72,10 @@ struct SteamPathService {
         cacheURL(steamID: steamID).appendingPathComponent("games_list.json")
     }
 
+    func profileCacheURL(steamID: String) -> URL {
+        cacheURL(steamID: steamID).appendingPathComponent("profile.json")
+    }
+
     private struct VDFUser {
         let steamID: String
         let mostRecent: Bool

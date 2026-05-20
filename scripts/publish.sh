@@ -56,12 +56,24 @@ fi
 
 cp "$DMG_VERSIONED" "$DMG_LATEST"
 
+sparkle_bin_dir() {
+    for cand in         "$ROOT/.build/artifacts/sparkle/Sparkle/bin"         "$ROOT/.build/checkouts/Sparkle/bin"; do
+        if [ -x "$cand/generate_appcast" ]; then
+            echo "$cand"
+            return 0
+        fi
+    done
+    find "$ROOT/.build" -type f -name generate_appcast 2>/dev/null | head -1 | xargs dirname 2>/dev/null || true
+}
+
 APPCAST=""
 if [ -n "${SPARKLE_PRIVATE_KEY:-}" ]; then
     UPDATES_DIR="$ROOT/build/updates"
     mkdir -p "$UPDATES_DIR"
     cp "$DMG_VERSIONED" "$UPDATES_DIR/"
-    GEN_TOOL=$(find "$ROOT/.build" -type f -name generate_appcast 2>/dev/null | head -1)
+    SPARKLE_DIR=$(sparkle_bin_dir || true)
+    GEN_TOOL=""
+    [ -n "$SPARKLE_DIR" ] && GEN_TOOL="$SPARKLE_DIR/generate_appcast"
     if [ -n "$GEN_TOOL" ] && [ -x "$GEN_TOOL" ]; then
         "$GEN_TOOL" --private-eddsa-key "$SPARKLE_PRIVATE_KEY" "$UPDATES_DIR" 2>/dev/null || true
         [ -f "$UPDATES_DIR/appcast.xml" ] && APPCAST="$UPDATES_DIR/appcast.xml"

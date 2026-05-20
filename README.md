@@ -1,11 +1,11 @@
 # HourDock for Mac
 
-HourDock is a clean, native macOS app for idling your Steam library and tracking hours without launching full games.
+HourDock is a native macOS app for idling your Steam library and tracking hours without launching full games.
 
-## Why You'd Use It
+## Features
 
-- Idle up to 32 games at once
-- Browse and launch from a polished macOS library UI
+- Run 32 games at once
+- Polished UI & Functional Menu Bar
 - Start/stop sessions from both the app and menu bar
 - Use floating idle banners in banner or icon style
 - Keep lightweight idle-time tracking and widget snapshots
@@ -20,7 +20,7 @@ HourDock is a clean, native macOS app for idling your Steam library and tracking
 
 ## Quick Start
 
-1. Open setup and paste your Steam Web API key
+1. Open setup and paste your Steam Web API key 
 2. Test the key and load your library
 3. Choose your idle banner style
 4. Click a game to start idling
@@ -32,37 +32,10 @@ HourDock is a clean, native macOS app for idling your Steam library and tracking
 
 If update checking is disabled, you're likely running a non-release build. Install from an official GitHub release DMG.
 
-## Full Reset (Fresh Experience)
+## Privacy
 
-Quit the app, then run:
-
-```bash
-defaults delete com.steamidlemac.app 2>/dev/null; security delete-generic-password -s com.steamidlemac.apikey -a steam_web_api 2>/dev/null; rm -f ~/Library/Preferences/com.steamidlemac.app.plist; rm -rf ~/Library/Caches/com.steamidlemac.app ~/Library/Application\ Support/com.steamidlemac.app
-```
-
-## Developer Commands
-
-Run locally:
-
-```bash
-bash "Launch HourDock.command"
-```
-
-Build app + DMG:
-
-```bash
-bash scripts/build-app.sh
-bash scripts/make-dmg.sh
-```
-
-Publish a release:
-
-```bash
-bash scripts/publish.sh 1.0.6
-```
-
-## Technical Notes
-
-- Bundle ID: `com.steamidlemac.app`
-- API key storage: macOS Keychain (`com.steamidlemac.apikey` / `steam_web_api`)
-- Sparkle updates require `SUFeedURL` and `SUPublicEDKey` in release builds
+- No HourDock account required
+- No analytics, ads, or third-party tracking SDKs
+- Steam Web API key is stored in macOS Keychain (`com.steamidlemac.apikey` / `steam_web_api`)
+- App preferences, cache, and idle metadata stay on your Mac
+- Network calls are only for Steam library/profile data and release update checks (GitHub/Sparkle)

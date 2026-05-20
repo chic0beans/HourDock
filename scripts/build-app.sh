@@ -81,8 +81,8 @@ cat > "$APP/Contents/Info.plist" << PLIST
 <dict>
 	<key>CFBundleExecutable</key><string>SteamIdleMac</string>
 	<key>CFBundleIdentifier</key><string>com.steamidlemac.app</string>
-	<key>CFBundleName</key><string>Steam Idle Mac</string>
-	<key>CFBundleDisplayName</key><string>Steam Idle Mac</string>
+	<key>CFBundleName</key><string>HourDock</string>
+	<key>CFBundleDisplayName</key><string>HourDock</string>
 	<key>CFBundlePackageType</key><string>APPL</string>
 	<key>CFBundleShortVersionString</key><string>${VERSION}</string>
 	<key>CFBundleVersion</key><string>${BUILD_NUMBER}</string>

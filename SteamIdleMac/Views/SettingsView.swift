@@ -7,6 +7,7 @@ struct SettingsView: View {
     @State private var saveError: String?
     @State private var isRefreshing = false
     @State private var animateBackdrop = false
+    @State private var isSteamIDLocked = true
     @FocusState private var apiKeyFocused: Bool
 
     var body: some View {
@@ -66,8 +67,41 @@ struct SettingsView: View {
 
                         settingsCard(title: "Account", subtitle: "Steam profile source") {
                             VStack(alignment: .leading, spacing: 10) {
-                                TextField("SteamID64", text: $appState.steamID64)
-                                    .styledGlassInput()
+                                HStack(spacing: 8) {
+                                    TextField("SteamID64", text: $appState.steamID64)
+                                        .styledGlassInput(
+                                            dimmed: isSteamIDLocked,
+                                            accent: isSteamIDLocked ? .secondary : .accentColor
+                                        )
+                                        .disabled(isSteamIDLocked)
+
+                                    Button {
+                                        withAnimation(.easeInOut(duration: 0.18)) {
+                                            isSteamIDLocked.toggle()
+                                        }
+                                        if isSteamIDLocked {
+                                            appState.detectSteamIDFromActiveAccount()
+                                        }
+                                    } label: {
+                                        Label(
+                                            isSteamIDLocked ? "Locked" : "Unlocked",
+                                            systemImage: isSteamIDLocked ? "lock.fill" : "lock.open.fill"
+                                        )
+                                        .font(.caption.weight(.semibold))
+                                        .padding(.horizontal, 10)
+                                        .padding(.vertical, 8)
+                                        .background(
+                                            Capsule()
+                                                .fill(isSteamIDLocked ? Color.white.opacity(0.10) : Color.accentColor.opacity(0.25))
+                                        )
+                                        .overlay(
+                                            Capsule()
+                                                .stroke(isSteamIDLocked ? Color.white.opacity(0.26) : Color.accentColor.opacity(0.55), lineWidth: 1)
+                                        )
+                                    }
+                                    .buttonStyle(.plain)
+                                    .help(isSteamIDLocked ? "Unlock to edit SteamID manually" : "Lock to use the detected active Steam account")
+                                }
                                 Text("Leave empty to auto-detect from Steam loginusers.vdf.")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
@@ -155,6 +189,7 @@ struct SettingsView: View {
         }
         .frame(minWidth: 560, idealWidth: 620, minHeight: 560)
         .onAppear {
+            appState.detectSteamIDFromActiveAccount()
             withAnimation(.easeInOut(duration: 8).repeatForever(autoreverses: true)) {
                 animateBackdrop = true
             }
@@ -258,18 +293,23 @@ struct SettingsView: View {
 }
 
 private extension View {
-    func styledGlassInput() -> some View {
+    func styledGlassInput(dimmed: Bool = false, accent: Color = Color.white) -> some View {
         self
             .textFieldStyle(.plain)
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
-            .background(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(.ultraThinMaterial)
-            )
+            .background {
+                if dimmed {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(Color.black.opacity(0.22))
+                } else {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(.ultraThinMaterial)
+                }
+            }
             .overlay(
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(Color.white.opacity(0.16), lineWidth: 1)
+                    .stroke(dimmed ? Color.white.opacity(0.24) : accent.opacity(0.16), lineWidth: 1)
             )
     }
 }

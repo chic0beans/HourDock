@@ -146,6 +146,14 @@ final class AppState: ObservableObject {
         onboardingCompleted = false
     }
 
+    func detectSteamIDFromActiveAccount() {
+        do {
+            steamID64 = try pathService.detectSteamID64()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
     func refreshLibrary(force: Bool) async {
         let key = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !key.isEmpty else {

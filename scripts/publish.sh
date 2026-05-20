@@ -40,7 +40,7 @@ export SIM_VERSION="$VERSION"
 export SIM_BUILD="$(date +%s)"
 
 echo ""
-echo "=== Publishing Steam Idle Mac v${VERSION} ==="
+echo "=== Publishing HourDock v${VERSION} ==="
 echo ""
 
 bash "$ROOT/scripts/build-app.sh"
@@ -95,7 +95,7 @@ else
     FILES=("$DMG_VERSIONED" "$DMG_LATEST")
     [ -n "$APPCAST" ] && FILES+=("$APPCAST")
     gh release create "$TAG" \
-        --title "Steam Idle Mac ${VERSION}" \
+        --title "HourDock ${VERSION}" \
         --notes "Download SteamIdleMac.dmg, open it, drag the app to Applications. First launch: right-click -> Open." \
         "${FILES[@]}"
 fi

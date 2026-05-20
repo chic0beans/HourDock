@@ -89,7 +89,7 @@ struct MenuBarDashboard: View {
             }
             menuButton("Check for updates...") { updater.checkForUpdates() }
                 .disabled(!updater.canCheck)
-            menuButton("Quit Steam Idle Mac") {
+            menuButton("Quit HourDock") {
                 appState.idleManager.cleanupOnQuit()
                 NSApp.terminate(nil)
             }

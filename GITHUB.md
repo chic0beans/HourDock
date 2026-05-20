@@ -1,4 +1,4 @@
-# Put Steam Idle Mac on GitHub (simple guide)
+# Put HourDock on GitHub (simple guide)
 
 Your username: **chic0beans**
 

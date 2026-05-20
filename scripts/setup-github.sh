@@ -14,7 +14,7 @@ REMOTE="https://github.com/${GITHUB_USER}/${GITHUB_REPO}.git"
 bash "$ROOT/scripts/install-tools.sh"
 
 echo ""
-echo "=== Steam Idle Mac — GitHub setup ==="
+echo "=== HourDock — GitHub setup ==="
 echo "Account: $GITHUB_USER"
 echo "Repo:    $GITHUB_REPO"
 echo ""
@@ -40,9 +40,9 @@ fi
 git add -A
 
 if ! git diff --cached --quiet 2>/dev/null; then
-    git commit -m "Steam Idle Mac"
+    git commit -m "HourDock"
 elif ! git rev-parse HEAD >/dev/null 2>&1; then
-    git commit --allow-empty -m "Steam Idle Mac"
+    git commit --allow-empty -m "HourDock"
 else
     echo "Nothing new to commit."
 fi

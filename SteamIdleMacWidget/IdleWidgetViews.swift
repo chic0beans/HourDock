@@ -48,7 +48,7 @@ struct IdleWidgetEntryView: View {
             }
 
             if sessions.isEmpty {
-                Text("Start idling in Steam Idle Mac")
+                Text("Start idling in HourDock")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else {

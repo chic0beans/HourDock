@@ -27,7 +27,7 @@ make_dmg_hdiutil() {
     STAGE=$(mktemp -d)
     cp -R "$APP" "$STAGE/SteamIdleMac.app"
     ln -s /Applications "$STAGE/Applications"
-    hdiutil create -volname "Steam Idle Mac ${VERSION}" -srcfolder "$STAGE" -ov -format UDZO "$DMG_PATH" >/dev/null
+    hdiutil create -volname "HourDock ${VERSION}" -srcfolder "$STAGE" -ov -format UDZO "$DMG_PATH" >/dev/null
     rm -rf "$STAGE"
 }
 
@@ -49,7 +49,7 @@ fi
 
 echo "==> Creating DMG with create-dmg..."
 DMG_ARGS=(
-    --volname "Steam Idle Mac ${VERSION}"
+    --volname "HourDock ${VERSION}"
     --window-pos 200 120
     --window-size 640 400
     --icon-size 128

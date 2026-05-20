@@ -465,9 +465,6 @@ private struct SortSegmentedControl: View {
                     }
                 } label: {
                     ZStack {
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .fill(Color.white.opacity(selection == order ? 0.001 : 0.08))
-
                         if selection == order {
                             RoundedRectangle(cornerRadius: 8, style: .continuous)
                                 .fill(Color.accentColor.opacity(0.9))
@@ -481,6 +478,9 @@ private struct SortSegmentedControl: View {
                             .padding(.vertical, 6)
                     }
                     .frame(minWidth: 100, minHeight: 32)
+                    .background(
+                        Rectangle().fill(Color.white.opacity(0.001))
+                    )
                 }
                 .buttonStyle(.plain)
                 .contentShape(Rectangle())

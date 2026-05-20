@@ -5,13 +5,22 @@ use std::process;
 use std::thread;
 use std::time::Duration;
 
+use serde_json::json;
+
+fn write_json_line<W: Write>(mut out: W, value: serde_json::Value) {
+    if let Ok(s) = serde_json::to_string(&value) {
+        let _ = writeln!(out, "{}", s);
+        let _ = out.flush();
+    }
+}
+
 fn print_json_error(message: &str) {
-    let _ = writeln!(io::stderr(), r#"{{"error":"{}"}}"#, message);
+    write_json_line(io::stderr(), json!({ "error": message }));
 }
 
 fn cmd_idle(args: &[String]) {
     if args.len() < 2 {
-        eprintln!("Usage: idle-helper idle <app_id> [display_name]");
+        print_json_error("Usage: idle-helper idle <app_id> [display_name]");
         process::exit(1);
     }
 
@@ -41,8 +50,7 @@ fn cmd_idle(args: &[String]) {
         }
     };
 
-    let _ = writeln!(io::stdout(), r#"{{"success":"Steam API initialized"}}"#);
-    let _ = io::stdout().flush();
+    write_json_line(io::stdout(), json!({ "success": "Steam API initialized" }));
 
     loop {
         client.run_callbacks();
@@ -53,14 +61,14 @@ fn cmd_idle(args: &[String]) {
 fn main() {
     let args: Vec<String> = env::args().collect();
     if args.len() < 2 {
-        eprintln!("Usage: idle-helper idle <app_id> [display_name]");
+        print_json_error("Usage: idle-helper idle <app_id> [display_name]");
         process::exit(1);
     }
 
     match args[1].as_str() {
         "idle" => cmd_idle(&args[1..]),
-        _ => {
-            eprintln!("Unknown command: {}", args[1]);
+        other => {
+            print_json_error(&format!("Unknown command: {}", other));
             process::exit(1);
         }
     }

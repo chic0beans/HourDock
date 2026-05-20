@@ -25,14 +25,15 @@ enum IdleProcessError: LocalizedError {
 
 @MainActor
 final class IdleProcessManager: ObservableObject {
-    static let maxConcurrent = 1
+    static let maxConcurrent = 32
     private static let startReadyTimeoutNs: UInt64 = 5_000_000_000
-    private static let postReadyStabilityNs: UInt64 = 1_200_000_000
+    private static let postReadyStabilityNs: UInt64 = 120_000_000
 
     @Published private(set) var activeSessions: [ActiveIdleSession] = []
 
     private var runningProcesses: [UInt64: Process] = [:]
     private var processRuntimeDirectories: [UInt64: URL] = [:]
+    private var startingAppIDs: Set<UInt64> = []
     private let steamRunning = SteamRunningService()
     private let pathService = SteamPathService()
 
@@ -51,10 +52,15 @@ final class IdleProcessManager: ObservableObject {
             return aux
         }
 
-        let devPath = URL(fileURLWithPath: "/Users/george/Documents/SteamIdleMac/idle-helper/target/release/idle-helper")
-        if FileManager.default.isExecutableFile(atPath: devPath.path) {
-            return devPath
+        #if DEBUG
+        if let srcRoot = ProcessInfo.processInfo.environment["SRCROOT"] {
+            let devPath = URL(fileURLWithPath: srcRoot)
+                .appendingPathComponent("idle-helper/target/release/idle-helper")
+            if FileManager.default.isExecutableFile(atPath: devPath.path) {
+                return devPath
+            }
         }
+        #endif
         return nil
     }
 
@@ -63,11 +69,17 @@ final class IdleProcessManager: ObservableObject {
             throw IdleProcessError.steamNotRunning
         }
 
-        if activeSessions.contains(where: { $0.appid == game.appid }) {
+        // Steam appids are u32 on the helper side; reject values that don't fit.
+        guard game.appid <= UInt64(UInt32.max) else {
+            throw IdleProcessError.failedToStart("Invalid app id: \(game.appid)")
+        }
+
+        if activeSessions.contains(where: { $0.appid == game.appid }) ||
+           startingAppIDs.contains(game.appid) {
             throw IdleProcessError.alreadyIdling
         }
 
-        if activeSessions.count >= Self.maxConcurrent {
+        if activeSessions.count + startingAppIDs.count >= Self.maxConcurrent {
             throw IdleProcessError.maxSessionsReached
         }
 
@@ -75,14 +87,27 @@ final class IdleProcessManager: ObservableObject {
             throw IdleProcessError.helperNotFound
         }
 
+        startingAppIDs.insert(game.appid)
+        defer { startingAppIDs.remove(game.appid) }
+
+        // File I/O for the per-helper runtime directory runs off the main actor so the
+        // UI stays responsive even on a slow disk.
         let helperDir = helper.deletingLastPathComponent()
-        let runtimeDir = try prepareHelperRuntime(helperDirectory: helperDir, appid: game.appid)
+        let pathService = self.pathService
+        let prepAppID = game.appid
+        let runtimeDir = try await Task.detached(priority: .userInitiated) {
+            try IdleProcessManager.prepareHelperRuntime(helperDirectory: helperDir,
+                                                       appid: prepAppID,
+                                                       pathService: pathService)
+        }.value
+        let environment = try IdleProcessManager.helperEnvironment(helperDirectory: runtimeDir,
+                                                                   pathService: pathService)
 
         let process = Process()
         process.executableURL = helper
         process.arguments = ["idle", String(game.appid), game.name]
         process.currentDirectoryURL = runtimeDir
-        process.environment = try helperEnvironment(helperDirectory: runtimeDir)
+        process.environment = environment
 
         let stdoutPipe = Pipe()
         let stderrPipe = Pipe()
@@ -91,11 +116,29 @@ final class IdleProcessManager: ObservableObject {
 
         try process.run()
 
-        try await waitForReadySignal(
-            process: process,
-            stdout: stdoutPipe,
-            stderr: stderrPipe
-        )
+        do {
+            try await waitForReadySignal(
+                process: process,
+                stdout: stdoutPipe,
+                stderr: stderrPipe
+            )
+        } catch {
+            if process.isRunning { process.terminate() }
+            cleanupRuntimeDirectory(for: game.appid, fallback: runtimeDir)
+            throw error
+        }
+
+        // Re-check capacity after the await; another start may have completed concurrently.
+        if activeSessions.count >= Self.maxConcurrent {
+            if process.isRunning { process.terminate() }
+            cleanupRuntimeDirectory(for: game.appid, fallback: runtimeDir)
+            throw IdleProcessError.maxSessionsReached
+        }
+        if activeSessions.contains(where: { $0.appid == game.appid }) {
+            if process.isRunning { process.terminate() }
+            cleanupRuntimeDirectory(for: game.appid, fallback: runtimeDir)
+            throw IdleProcessError.alreadyIdling
+        }
 
         let appid = game.appid
         let pid = process.processIdentifier
@@ -110,25 +153,46 @@ final class IdleProcessManager: ObservableObject {
     }
 
     func stopIdle(appid: UInt64) {
-        if let process = runningProcesses[appid] {
-            process.terminationHandler = nil
-            if process.isRunning {
-                process.terminate()
-                DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 0.3) {
-                    if process.isRunning {
-                        kill(process.processIdentifier, SIGKILL)
-                    }
-                }
-            }
-        } else if let session = activeSessions.first(where: { $0.appid == appid }) {
-            kill(session.pid, SIGTERM)
-            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 0.3) {
-                kill(session.pid, SIGKILL)
+        guard let process = runningProcesses[appid] else {
+            // No tracked Process; treat as already stopped. Don't kill stale PIDs.
+            processRuntimeDirectories.removeValue(forKey: appid)
+            activeSessions.removeAll { $0.appid == appid }
+            return
+        }
+
+        // Keep the session in `activeSessions` until termination so widgets/UI stay accurate
+        // during the brief teardown window. The handler cleans up state.
+        let runtimeDir = processRuntimeDirectories[appid]
+        process.terminationHandler = { [weak self] _ in
+            Task { @MainActor in
+                self?.finalizeStop(appid: appid, runtimeDir: runtimeDir)
             }
         }
+        if process.isRunning {
+            process.terminate()
+            let pid = process.processIdentifier
+            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 0.3) { [weak process] in
+                if let p = process, p.isRunning {
+                    kill(pid, SIGKILL)
+                }
+            }
+        } else {
+            finalizeStop(appid: appid, runtimeDir: runtimeDir)
+        }
+    }
+
+    private func finalizeStop(appid: UInt64, runtimeDir: URL?) {
         runningProcesses.removeValue(forKey: appid)
         processRuntimeDirectories.removeValue(forKey: appid)
         activeSessions.removeAll { $0.appid == appid }
+        if let runtimeDir {
+            try? FileManager.default.removeItem(at: runtimeDir)
+        }
+    }
+
+    private func cleanupRuntimeDirectory(for appid: UInt64, fallback: URL) {
+        let url = processRuntimeDirectories.removeValue(forKey: appid) ?? fallback
+        try? FileManager.default.removeItem(at: url)
     }
 
     func stopAll() {
@@ -144,9 +208,13 @@ final class IdleProcessManager: ObservableObject {
 
     private func handleUnexpectedTermination(appid: UInt64, pid: Int32) {
         guard let tracked = runningProcesses[appid], tracked.processIdentifier == pid else { return }
+        let runtimeDir = processRuntimeDirectories[appid]
         runningProcesses.removeValue(forKey: appid)
         processRuntimeDirectories.removeValue(forKey: appid)
         activeSessions.removeAll { $0.appid == appid }
+        if let runtimeDir {
+            try? FileManager.default.removeItem(at: runtimeDir)
+        }
     }
 
     private func waitForReadySignal(process: Process, stdout: Pipe, stderr: Pipe) async throws {
@@ -160,11 +228,22 @@ final class IdleProcessManager: ObservableObject {
 
         stdout.fileHandleForReading.readabilityHandler = { handle in
             let data = handle.availableData
-            if data.isEmpty { outBuffer.flush() } else { outBuffer.append(data) }
+            if data.isEmpty {
+                // EOF on the pipe: flush whatever's left and detach.
+                outBuffer.flush()
+                handle.readabilityHandler = nil
+            } else {
+                outBuffer.append(data)
+            }
         }
         stderr.fileHandleForReading.readabilityHandler = { handle in
             let data = handle.availableData
-            if data.isEmpty { errBuffer.flush() } else { errBuffer.append(data) }
+            if data.isEmpty {
+                errBuffer.flush()
+                handle.readabilityHandler = nil
+            } else {
+                errBuffer.append(data)
+            }
         }
 
         defer {
@@ -176,17 +255,21 @@ final class IdleProcessManager: ObservableObject {
         let pollStep: UInt64 = 20_000_000
 
         while elapsed < Self.startReadyTimeoutNs {
+            if let reported = state.reportedError {
+                throw IdleProcessError.failedToStart(reported)
+            }
+
             if state.hasSuccess {
-                // Guard against transient startups that print success then drop quickly.
+                // Keep this tiny so "Idle" feels instant while still avoiding immediate races.
                 try await Task.sleep(nanoseconds: Self.postReadyStabilityNs)
                 if process.isRunning {
                     return
                 }
-                throw IdleProcessError.failedToStart(parseHelperError(state.joinedOutput))
+                throw IdleProcessError.failedToStart(state.reportedError ?? parseHelperError(state.joinedOutput))
             }
 
             if !process.isRunning {
-                throw IdleProcessError.failedToStart(parseHelperError(state.joinedOutput))
+                throw IdleProcessError.failedToStart(state.reportedError ?? parseHelperError(state.joinedOutput))
             }
 
             try await Task.sleep(nanoseconds: pollStep)
@@ -195,6 +278,9 @@ final class IdleProcessManager: ObservableObject {
 
         if process.isRunning {
             process.terminate()
+        }
+        if let reported = state.reportedError {
+            throw IdleProcessError.failedToStart(reported)
         }
         let joined = state.joinedOutput
         throw IdleProcessError.failedToStart(joined.isEmpty
@@ -235,10 +321,17 @@ final class IdleProcessManager: ObservableObject {
         }
     }
 
+    private struct HelperMessage: Decodable {
+        let success: String?
+        let error: String?
+    }
+
     private final class HelperOutputState: @unchecked Sendable {
         private let lock = NSLock()
         private var lines: [String] = []
         private var sawSuccess = false
+        private var helperError: String?
+        private let decoder = JSONDecoder()
 
         func record(line: String, fromStdErr: Bool) {
             let cleaned = line.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -246,8 +339,16 @@ final class IdleProcessManager: ObservableObject {
             lock.lock()
             defer { lock.unlock() }
             lines.append(cleaned)
-            if !fromStdErr && (cleaned.contains("\"success\"") || cleaned.contains("Steam API initialized")) {
-                sawSuccess = true
+
+            // Parse only well-formed NDJSON objects emitted by idle-helper.
+            if let data = cleaned.data(using: .utf8),
+               let msg = try? decoder.decode(HelperMessage.self, from: data) {
+                if !fromStdErr, msg.success != nil {
+                    sawSuccess = true
+                }
+                if let err = msg.error, helperError == nil {
+                    helperError = err
+                }
             }
         }
 
@@ -262,9 +363,19 @@ final class IdleProcessManager: ObservableObject {
             defer { lock.unlock() }
             return sawSuccess
         }
+
+        var reportedError: String? {
+            lock.lock()
+            defer { lock.unlock() }
+            return helperError
+        }
     }
 
-    private func prepareHelperRuntime(helperDirectory: URL, appid: UInt64) throws -> URL {
+    // MARK: - Filesystem helpers (Sendable, callable off the main actor)
+
+    nonisolated private static func prepareHelperRuntime(helperDirectory: URL,
+                                                         appid: UInt64,
+                                                         pathService: SteamPathService) throws -> URL {
         let fm = FileManager.default
         let runtimeDir = helperDirectory.appendingPathComponent("runtime-\(appid)", isDirectory: true)
         try fm.createDirectory(at: runtimeDir, withIntermediateDirectories: true)
@@ -274,11 +385,23 @@ final class IdleProcessManager: ObservableObject {
 
         let bundledDylib = runtimeDir.appendingPathComponent("libsteam_api.dylib")
         if !fm.fileExists(atPath: bundledDylib.path) {
-            let candidates = [
-                URL(fileURLWithPath: "/Users/george/Documents/SteamIdleMac/ThirdParty/libsteam_api.dylib"),
-                helperDirectory.appendingPathComponent("libsteam_api.dylib"),
-                URL(fileURLWithPath: "/Users/george/Documents/SteamIdleMac/idle-helper/target/release/build/steamworks-sys-2cb9440c9a5c448e/out/libsteam_api.dylib")
-            ]
+            var candidates: [URL] = [helperDirectory.appendingPathComponent("libsteam_api.dylib")]
+            if let frameworksDylib = Bundle.main.privateFrameworksURL?.appendingPathComponent("libsteam_api.dylib") {
+                candidates.append(frameworksDylib)
+            }
+            #if DEBUG
+            if let srcRoot = ProcessInfo.processInfo.environment["SRCROOT"] {
+                let root = URL(fileURLWithPath: srcRoot)
+                candidates.append(root.appendingPathComponent("ThirdParty/libsteam_api.dylib"))
+                // Search any cargo build directory for a recent libsteam_api.dylib.
+                let buildDir = root.appendingPathComponent("idle-helper/target/release/build")
+                if let subdirs = try? fm.contentsOfDirectory(at: buildDir, includingPropertiesForKeys: nil) {
+                    for sub in subdirs {
+                        candidates.append(sub.appendingPathComponent("out/libsteam_api.dylib"))
+                    }
+                }
+            }
+            #endif
             if let source = candidates.first(where: { fm.fileExists(atPath: $0.path) }) {
                 try? fm.copyItem(at: source, to: bundledDylib)
             }
@@ -294,7 +417,8 @@ final class IdleProcessManager: ObservableObject {
         return runtimeDir
     }
 
-    private func helperEnvironment(helperDirectory: URL) throws -> [String: String] {
+    nonisolated private static func helperEnvironment(helperDirectory: URL,
+                                                      pathService: SteamPathService) throws -> [String: String] {
         var env = ProcessInfo.processInfo.environment
         var paths = [helperDirectory.path]
 

@@ -36,7 +36,7 @@ struct MenuBarDashboard: View {
         if sessions.isEmpty {
             HStack {
                 Spacer()
-                Text("No active idles")
+                Text("Nothing idling")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                 Spacer()
@@ -65,12 +65,15 @@ struct MenuBarDashboard: View {
         VStack(spacing: 0) {
             menuButton("Show window") {
                 NSApp.activate(ignoringOtherApps: true)
-                for window in NSApp.windows where window.contentViewController != nil && !(window is NSPanel) {
-                    window.makeKeyAndOrderFront(nil)
+                let candidates = NSApp.windows.filter { window in
+                    !(window is NSPanel) && window.canBecomeMain
                 }
+                let tagged = candidates.first { $0.identifier == MainWindowIdentifier.value }
+                let target = tagged ?? candidates.first
+                target?.makeKeyAndOrderFront(nil)
             }
             if !appState.selectedAppIDs.isEmpty {
-                menuButton("Start from selection (\(appState.selectedAppIDs.count))") {
+                menuButton("Start selected (\(appState.selectedAppIDs.count))") {
                     appState.startIdleForSelection()
                 }
             }
@@ -119,7 +122,7 @@ private struct DashboardRow: View {
                 Text(game?.name ?? session.name)
                     .font(.callout)
                     .lineLimit(1)
-                Text("pid \(session.pid)")
+                Text("Idling")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
@@ -132,8 +135,9 @@ private struct DashboardRow: View {
             }
             .buttonStyle(.borderless)
             .foregroundStyle(.red)
-            .opacity(hovering ? 1 : 0.6)
+            .opacity(hovering ? 1 : 0.75)
             .help("Stop \(game?.name ?? session.name)")
+            .accessibilityLabel("Stop \(game?.name ?? session.name)")
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
@@ -147,11 +151,8 @@ private struct DashboardRow: View {
     @ViewBuilder
     private var iconView: some View {
         if let g = game {
-            AsyncImage(url: g.iconImageURL) { phase in
-                switch phase {
-                case .success(let image): image.resizable().aspectRatio(contentMode: .fill)
-                default: Rectangle().fill(Color.gray.opacity(0.3))
-                }
+            CachedRemoteImage(url: g.iconImageURL, contentMode: .fill) {
+                Rectangle().fill(Color.gray.opacity(0.3))
             }
         } else {
             Rectangle().fill(Color.gray.opacity(0.3))

@@ -9,9 +9,11 @@ enum IdleSnapshotStore {
     }
 
     static func save(sessions: [ActiveIdleSession], games: [Game]) {
+        // O(1) lookup instead of scanning `games` per session.
+        let gamesByID = Dictionary(uniqueKeysWithValues: games.map { ($0.appid, $0) })
         let entries = sessions.map { session -> IdleSnapshotEntry in
-            let game = games.first { $0.appid == session.appid }
-            let url = game?.widgetIconURL ?? game?.iconImageURL
+            let game = gamesByID[session.appid]
+            let url: URL? = game.flatMap { $0.widgetIconURL } ?? game.flatMap { $0.iconImageURL }
             return IdleSnapshotEntry(
                 appid: session.appid,
                 name: game?.name ?? session.name,

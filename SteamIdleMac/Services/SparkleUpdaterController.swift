@@ -32,8 +32,9 @@ final class SparkleUpdaterController: ObservableObject {
         let info = Bundle.main.infoDictionary ?? [:]
         let feed = (info["SUFeedURL"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let pub = (info["SUPublicEDKey"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        // Need at least a feed URL. If SUPublicEDKey is missing, Sparkle will refuse to install but
-        // the controller can still be created.
+        // Sparkle 2.x will refuse to install updates without an EdDSA public key, so we require
+        // both `SUFeedURL` and `SUPublicEDKey` before creating the standard controller. Dev
+        // builds without these keys silently disable the "Check for updates..." menu items.
         return !feed.isEmpty && !pub.isEmpty
     }
 }

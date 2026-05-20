@@ -13,8 +13,8 @@ struct Game: Identifiable, Codable, Hashable {
         Double(playtimeForever) / 60.0
     }
 
-    var headerImageURL: URL {
-        URL(string: "https://cdn.cloudflare.steamstatic.com/steam/apps/\(appid)/header.jpg")!
+    var headerImageURL: URL? {
+        URL(string: "https://cdn.cloudflare.steamstatic.com/steam/apps/\(appid)/header.jpg")
     }
 
     var iconImageURL: URL? {
@@ -25,12 +25,12 @@ struct Game: Identifiable, Codable, Hashable {
     }
 
     /// Prefer higher-res art for widgets and compact banners (scaled down).
-    var widgetIconURL: URL {
-        URL(string: "https://cdn.cloudflare.steamstatic.com/steam/apps/\(appid)/logo.png")!
+    var widgetIconURL: URL? {
+        URL(string: "https://cdn.cloudflare.steamstatic.com/steam/apps/\(appid)/logo.png")
     }
 
-    var capsuleImageURL: URL {
-        URL(string: "https://cdn.cloudflare.steamstatic.com/steam/apps/\(appid)/library_600x900.jpg")!
+    var capsuleImageURL: URL? {
+        URL(string: "https://cdn.cloudflare.steamstatic.com/steam/apps/\(appid)/library_600x900.jpg")
     }
 
     init(appid: UInt64, name: String, playtimeForever: UInt64, imgIconURL: String? = nil, lastPlayedAt: UInt64? = nil) {

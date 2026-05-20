@@ -1,9 +1,14 @@
 import SwiftUI
 import AppKit
 
+extension Notification.Name {
+    static let steamIdleAppWillTerminate = Notification.Name("com.steamidlemac.app.willTerminate")
+}
+
 struct ContentView: View {
     @EnvironmentObject private var appState: AppState
     @StateObject private var bannerManager = IdleBannerWindowManager()
+    @State private var activeAppIDsSnapshot: [UInt64] = []
 
     var body: some View {
         Group {
@@ -28,36 +33,33 @@ struct ContentView: View {
         } message: {
             Text(appState.errorMessage ?? "")
         }
-        .onAppear { configureWindowLevels() }
-        .onChange(of: appState.bannerStyle) { _ in resyncBanners() }
-        .onChange(of: appState.idleManager.activeSessions.map(\.appid)) { _ in
-            resyncBanners()
+        .onAppear {
+            activeAppIDsSnapshot = appState.idleManager.activeSessions.map(\.appid)
+            resyncBanners(sessions: appState.idleManager.activeSessions)
         }
-        .onDisappear {
+        .onChange(of: appState.bannerStyle) { _ in
+            resyncBanners(sessions: appState.idleManager.activeSessions)
+        }
+        .onReceive(appState.idleManager.$activeSessions) { sessions in
+            let ids = sessions.map(\.appid)
+            guard ids != activeAppIDsSnapshot else { return }
+            activeAppIDsSnapshot = ids
+            // `@Published` emits before the backing property is committed; use the emitted
+            // value directly so banner sync reflects starts/stops immediately.
+            resyncBanners(sessions: sessions)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .steamIdleAppWillTerminate)) { _ in
             bannerManager.closeAll()
-            appState.idleManager.cleanupOnQuit()
         }
     }
 
-    private func resyncBanners() {
+    private func resyncBanners(sessions: [ActiveIdleSession]) {
         bannerManager.sync(
-            with: appState.idleManager.activeSessions,
+            with: sessions,
             games: appState.games,
             style: appState.bannerStyle
         ) { appid in
             appState.stopIdle(appid: appid)
-        }
-        configureWindowLevels()
-    }
-
-    /// Main window stays above idle banners without floating over other apps.
-    private func configureWindowLevels() {
-        for window in NSApp.windows {
-            if window is NSPanel {
-                window.level = NSWindow.Level(rawValue: NSWindow.Level.normal.rawValue - 1)
-            } else if window.contentView != nil {
-                window.level = .normal
-            }
         }
     }
 }

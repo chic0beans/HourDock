@@ -9,10 +9,10 @@ struct SetupView: View {
                 .font(.system(size: 48))
                 .foregroundStyle(.secondary)
 
-            Text("Steam Web API key required")
+            Text("API key needed")
                 .font(.title2.bold())
 
-            Text("Add your key to load your full owned library. Your key is stored in the macOS Keychain.")
+            Text("Add your Steam Web API key to load your library.")
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: 420)

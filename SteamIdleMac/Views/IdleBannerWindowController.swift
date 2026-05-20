@@ -5,24 +5,29 @@ enum IdleBannerLayout {
     static let landscapeSize = CGSize(width: 460, height: 215)
     static let iconSize = CGSize(width: 184, height: 69)
     static let spacing: CGFloat = 12
-    static let origin = CGPoint(x: 48, y: 48)
+    /// Inset from the screen's visible frame so banners never sit under the Dock or menu bar.
+    static let edgeInset: CGFloat = 24
 
     static func windowSize(for style: BannerStyle) -> CGSize {
         style == .landscape ? landscapeSize : iconSize
     }
 
     static func frameOrigin(index: Int, windowSize: CGSize, style: BannerStyle) -> CGPoint {
-        let cols: Int
+        let visibleFrame = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1280, height: 800)
+        let availableWidth = max(visibleFrame.width - edgeInset * 2, windowSize.width)
+        let perRowFromWidth = max(1, Int(floor((availableWidth + spacing) / (windowSize.width + spacing))))
+
+        let preferredCols: Int
         switch style {
-        case .landscape:
-            cols = 2
-        case .icon:
-            cols = 5
+        case .landscape: preferredCols = 2
+        case .icon: preferredCols = 5
         }
+        let cols = min(preferredCols, perRowFromWidth)
+
         let row = index / cols
         let col = index % cols
-        let x = origin.x + CGFloat(col) * (windowSize.width + spacing)
-        let y = origin.y + CGFloat(row) * (windowSize.height + spacing)
+        let x = visibleFrame.minX + edgeInset + CGFloat(col) * (windowSize.width + spacing)
+        let y = visibleFrame.minY + edgeInset + CGFloat(row) * (windowSize.height + spacing)
         return CGPoint(x: x, y: y)
     }
 }
@@ -58,6 +63,7 @@ final class IdleBannerWindowController: NSWindowController, NSWindowDelegate {
         panel.hidesOnDeactivate = false
         panel.backgroundColor = .clear
         panel.isOpaque = false
+        panel.setAccessibilityTitle("Idling \(game.name)")
 
         super.init(window: panel)
         panel.delegate = self
@@ -88,6 +94,11 @@ final class IdleBannerWindowController: NSWindowController, NSWindowDelegate {
         guard !didHandleStop else { return }
         didHandleStop = true
         window?.delegate = nil
+        // Drop the hosted SwiftUI tree before close so any captured references are freed
+        // immediately rather than at the next runloop tick.
+        if let panel = window as? NSPanel {
+            panel.contentView = nil
+        }
         close()
     }
 
@@ -121,19 +132,11 @@ struct IdleBannerView: View {
 
     @ViewBuilder
     private func landscapeArtwork(size: CGSize) -> some View {
-        AsyncImage(url: game.headerImageURL) { phase in
-            switch phase {
-            case .success(let image):
-                image
-                    .resizable()
-                    .interpolation(.high)
-                    .scaledToFill()
-                    .frame(width: size.width, height: size.height)
-                    .clipped()
-            default:
-                placeholder(size: size, label: game.name)
-            }
+        CachedRemoteImage(url: game.headerImageURL, contentMode: .fill) {
+            placeholder(size: size, label: game.name)
         }
+        .frame(width: size.width, height: size.height)
+        .clipped()
     }
 
     @ViewBuilder
@@ -144,40 +147,12 @@ struct IdleBannerView: View {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .stroke(Color.white.opacity(0.08), lineWidth: 1)
 
-            AsyncImage(url: game.widgetIconURL) { phase in
-                switch phase {
-                case .success(let image):
-                    image
-                        .resizable()
-                        .interpolation(.high)
-                        .scaledToFit()
-                        .padding(8)
-                case .failure:
-                    AsyncImage(url: game.iconImageURL) { phase2 in
-                        if case .success(let image) = phase2 {
-                            image
-                                .resizable()
-                                .interpolation(.high)
-                                .scaledToFit()
-                                .padding(8)
-                        } else {
-                            tileTextFallback
-                        }
-                    }
-                default:
-                    tileTextFallback
-                }
-            }
+            // Single loader walks the URL fallback chain (widget icon -> icon hash) so
+            // we don't stack AsyncImages and double-fetch on failure.
+            BannerIconImage(game: game)
+                .padding(8)
         }
         .frame(width: size.width, height: size.height)
-    }
-
-    private var tileTextFallback: some View {
-        Text(game.name)
-            .font(.caption.bold())
-            .multilineTextAlignment(.center)
-            .lineLimit(2)
-            .padding(6)
     }
 
     private func placeholder(size: CGSize, label: String) -> some View {
@@ -191,6 +166,43 @@ struct IdleBannerView: View {
                 .padding(6)
         }
         .frame(width: size.width, height: size.height)
+    }
+}
+
+private struct BannerIconImage: View {
+    let game: Game
+    @State private var image: NSImage?
+
+    var body: some View {
+        Group {
+            if let image {
+                Image(nsImage: image)
+                    .resizable()
+                    .interpolation(.high)
+                    .scaledToFit()
+            } else {
+                Text(game.name)
+                    .font(.caption.bold())
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+            }
+        }
+        .task(id: game.appid) {
+            // Try high-res widget icon first, fall back to icon hash URL.
+            let candidates: [URL?] = [game.widgetIconURL, game.iconImageURL]
+            for case let url? in candidates {
+                if let cached = RemoteImageCache.shared.image(for: url) {
+                    image = cached
+                    return
+                }
+            }
+            for case let url? in candidates {
+                if let loaded = await RemoteImageCache.shared.load(url) {
+                    image = loaded
+                    return
+                }
+            }
+        }
     }
 }
 
@@ -257,11 +269,6 @@ final class IdleBannerWindowManager: ObservableObject {
         if didMutateLayout {
             relayoutAll(style: style)
         }
-    }
-
-    func removeController(appid: UInt64) {
-        controllers.removeValue(forKey: appid)
-        sessionOrder.removeAll { $0 == appid }
     }
 
     func closeAll() {

@@ -64,6 +64,8 @@ final class IdleTimeStore: ObservableObject {
         }
     }
 
+    // MARK: - Private
+
     private func storedHours(for appid: UInt64) -> Double {
         hoursByAppID[appid] ?? 0
     }
@@ -92,11 +94,29 @@ final class IdleTimeStore: ObservableObject {
         }
     }
 
+    /// Flushes any time accrued by active sessions to `hoursByAppID` and persists.
+    /// Active timers stay running; we just check-point the running totals so a crash
+    /// can't drop the entire session's idle hours.
+    private func checkpointActiveSessions() {
+        guard !sessionStartByAppID.isEmpty else { return }
+        let now = Date()
+        for (appid, start) in sessionStartByAppID {
+            let elapsed = now.timeIntervalSince(start) / 3600.0
+            if elapsed > 0 {
+                hoursByAppID[appid, default: 0] += elapsed
+            }
+            sessionStartByAppID[appid] = now
+        }
+        persist()
+    }
+
     private func startPersistTimerIfNeeded() {
         guard persistTimer == nil else { return }
         persistTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
             Task { @MainActor in
-                self?.objectWillChange.send()
+                guard let self else { return }
+                self.checkpointActiveSessions()
+                self.objectWillChange.send()
             }
         }
     }

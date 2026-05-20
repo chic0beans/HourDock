@@ -1,6 +1,11 @@
 import Foundation
 
 /// Shared between app and widget extension (App Group).
+///
+/// NOTE: This file is intentionally duplicated with `Shared/IdleSnapshotShared.swift`.
+/// The Xcode widget target (built via `project.yml`) sources `Shared/`, while the
+/// `swift build` package target sources only `SteamIdleMac/`. Keep the two copies in
+/// lockstep when changing this file.
 struct IdleSnapshotEntry: Codable, Identifiable, Hashable {
     let appid: UInt64
     let name: String

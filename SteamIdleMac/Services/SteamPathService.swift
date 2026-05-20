@@ -81,31 +81,70 @@ struct SteamPathService {
         let mostRecent: Bool
     }
 
+    /// Minimal VDF parser tuned for `loginusers.vdf`. Tracks brace depth so we only
+    /// treat keys at the user-object level (depth 2) as SteamIDs, and reads
+    /// `"MostRecent" "1"` as a value pair rather than relying on substring heuristics.
     private func parseVDFUsers(_ contents: String) -> [VDFUser] {
         var users: [VDFUser] = []
+        var depth = 0
         var currentID: String?
         var mostRecent = false
 
         for rawLine in contents.components(separatedBy: .newlines) {
-            let line = rawLine.trimmingCharacters(in: .whitespaces)
-            if line.hasPrefix("\"") && line.hasSuffix("\"") && !line.contains("\t") {
-                let id = String(line.dropFirst().dropLast())
+            let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+            if line == "{" {
+                depth += 1
+                continue
+            }
+            if line == "}" {
+                if depth == 2, let id = currentID {
+                    users.append(VDFUser(steamID: id, mostRecent: mostRecent))
+                    currentID = nil
+                    mostRecent = false
+                }
+                depth = max(0, depth - 1)
+                continue
+            }
+
+            let tokens = vdfTokens(in: line)
+            switch tokens.count {
+            case 1 where depth == 1:
+                // The user block key — a SteamID64. Next non-empty line should be `{`.
+                let id = tokens[0]
                 if id.allSatisfy(\.isNumber), id.count >= 16 {
-                    if let currentID {
-                        users.append(VDFUser(steamID: currentID, mostRecent: mostRecent))
-                    }
                     currentID = id
                     mostRecent = false
                 }
-            } else if line.contains("MostRecent") && line.contains("1") {
-                mostRecent = true
+            case 2 where depth == 2:
+                if tokens[0].caseInsensitiveCompare("MostRecent") == .orderedSame,
+                   tokens[1] == "1" {
+                    mostRecent = true
+                }
+            default:
+                break
             }
         }
 
-        if let currentID {
-            users.append(VDFUser(steamID: currentID, mostRecent: mostRecent))
-        }
-
         return users
+    }
+
+    /// Splits a VDF line into its quoted tokens. Both keys and values in `loginusers.vdf`
+    /// are quoted, so we just collect everything inside matched pairs of `"`.
+    private func vdfTokens(in line: String) -> [String] {
+        var tokens: [String] = []
+        var current: String?
+        for char in line {
+            if char == "\"" {
+                if let value = current {
+                    tokens.append(value)
+                    current = nil
+                } else {
+                    current = ""
+                }
+            } else if current != nil {
+                current?.append(char)
+            }
+        }
+        return tokens
     }
 }

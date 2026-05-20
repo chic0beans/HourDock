@@ -9,8 +9,9 @@ private enum LibraryGridMetrics {
 
 struct GameLibraryView: View {
     @EnvironmentObject private var appState: AppState
-    @Namespace private var cardNamespace
-    @State private var appear = false
+    @ObservedObject private var idleTimeStore = IdleTimeStore.shared
+    @StateObject private var backdropPalette = IdleBackdropPaletteStore()
+    @State private var refreshTask: Task<Void, Never>?
 
     private var columns: [GridItem] {
         [GridItem(.adaptive(minimum: LibraryGridMetrics.cardMinWidth), spacing: LibraryGridMetrics.spacing)]
@@ -21,10 +22,10 @@ struct GameLibraryView: View {
             let showRail = proxy.size.width >= 1220
 
             ZStack {
-                DashboardBackground()
+                AmbientBubbleBackground(specs: backdropPalette.specs, dimWhenInactive: true)
 
                 if appState.isLoadingLibrary && appState.games.isEmpty {
-                    ProgressView("Loading library...")
+                    ProgressView("Loading games...")
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else if appState.games.isEmpty {
                     emptyState
@@ -32,11 +33,19 @@ struct GameLibraryView: View {
                     contentLayout(showRail: showRail)
                 }
             }
-            .onAppear {
-                withAnimation(.spring(response: 0.6, dampingFraction: 0.86)) {
-                    appear = true
-                }
-            }
+        }
+        .onDisappear {
+            refreshTask?.cancel()
+            refreshTask = nil
+        }
+        .onAppear {
+            refreshBackdropPalette()
+        }
+        .onChange(of: appState.idleManager.activeSessions) { _ in
+            refreshBackdropPalette()
+        }
+        .onChange(of: appState.games) { _ in
+            refreshBackdropPalette()
         }
     }
 
@@ -46,34 +55,31 @@ struct GameLibraryView: View {
                 VStack(alignment: .leading, spacing: 18) {
                     heroHeader
                         .padding(.horizontal, LibraryGridMetrics.horizontalPadding)
-                        .offset(y: appear ? 0 : -16)
-                        .opacity(appear ? 1 : 0.5)
 
                     controlBar
                         .padding(.horizontal, LibraryGridMetrics.horizontalPadding)
 
                     if !spotlightGames.isEmpty {
-                        sectionCard(title: "Continue Playing", subtitle: "Recent and currently active titles") {
+                        sectionCard(title: "Recent Games") {
                             spotlightStrip
                         }
                         .padding(.horizontal, LibraryGridMetrics.horizontalPadding)
                     }
 
                     if !idlingGames.isEmpty {
-                        sectionCard(title: "Idling", subtitle: "\(idlingGames.count) games actively earning time") {
+                        sectionCard(title: "Idling", subtitle: "\(idlingGames.count) active") {
                             libraryGrid(games: idlingGames)
                         }
                         .padding(.horizontal, LibraryGridMetrics.horizontalPadding)
-                        .transition(.move(edge: .top).combined(with: .opacity))
                     }
 
-                    sectionCard(title: "Library", subtitle: "\(libraryGames.count) games available") {
+                    sectionCard(title: "Library", subtitle: "\(libraryGames.count) games") {
                         libraryGrid(games: libraryGames)
                     }
                     .padding(.horizontal, LibraryGridMetrics.horizontalPadding)
                 }
                 .padding(.vertical, 18)
-                .animation(.spring(response: 0.45, dampingFraction: 0.85), value: idlingGames.map(\.appid))
+                .animation(.spring(response: 0.32, dampingFraction: 0.8), value: appState.idleManager.activeSessions.count)
             }
 
             if showRail {
@@ -81,7 +87,6 @@ struct GameLibraryView: View {
                     .frame(width: 300)
                     .padding(.trailing, 20)
                     .padding(.top, 18)
-                    .transition(.move(edge: .trailing).combined(with: .opacity))
             }
         }
         .overlay(alignment: .bottomTrailing) {
@@ -95,16 +100,12 @@ struct GameLibraryView: View {
 
     private var heroHeader: some View {
         HStack(alignment: .center, spacing: 14) {
-            AsyncImage(url: appState.profileAvatarURL) { phase in
-                if case .success(let image) = phase {
-                    image.resizable().scaledToFill()
-                } else {
-                    ZStack {
-                        Circle().fill(Color.white.opacity(0.10))
-                        Image(systemName: "person.crop.circle.fill")
-                            .font(.system(size: 26))
-                            .foregroundStyle(.white.opacity(0.85))
-                    }
+            CachedRemoteImage(url: appState.profileAvatarURL, contentMode: .fill) {
+                ZStack {
+                    Circle().fill(Color.white.opacity(0.10))
+                    Image(systemName: "person.crop.circle.fill")
+                        .font(.system(size: 26))
+                        .foregroundStyle(.white.opacity(0.85))
                 }
             }
             .frame(width: 56, height: 56)
@@ -112,8 +113,7 @@ struct GameLibraryView: View {
             .overlay(Circle().stroke(Color.white.opacity(0.22), lineWidth: 1))
 
             VStack(alignment: .leading, spacing: 4) {
-                Text("Hello, \(appState.greetingName)")
-                    .font(.system(size: 30, weight: .bold, design: .rounded))
+                AnimatedGreetingText(text: appState.greetingLine)
                 Text(heroSubtitle)
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
@@ -132,127 +132,128 @@ struct GameLibraryView: View {
                     .disabled(appState.idleManager.activeSessions.isEmpty)
 
                 Button {
-                    Task {
+                    refreshTask?.cancel()
+                    refreshTask = Task { @MainActor in
                         await appState.refreshLibrary(force: true)
-                        await appState.refreshProfile(force: true)
+                        guard !Task.isCancelled else { return }
+                        await appState.refreshProfileFromNetwork(minInterval: 0)
                     }
                 } label: {
                     Image(systemName: "arrow.clockwise")
                 }
                 .buttonStyle(.bordered)
+                .accessibilityLabel("Refresh library")
+                .help("Refresh library")
                 .disabled(appState.isLoadingLibrary || appState.isLoadingProfile)
             }
         }
         .padding(18)
         .background(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(.ultraThinMaterial)
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(.ultraThinMaterial.opacity(0.93))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .stroke(Color.white.opacity(0.15), lineWidth: 1)
         )
-        .shadow(color: .black.opacity(0.16), radius: 16, y: 8)
+        .shadow(color: .black.opacity(0.16), radius: 14, y: 6)
     }
 
     private var controlBar: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 12) {
-                HStack(spacing: 8) {
-                    Image(systemName: "magnifyingglass")
-                        .foregroundStyle(.secondary)
-                    TextField("Search games", text: $appState.searchText)
-                        .textFieldStyle(.plain)
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(
-                    RoundedRectangle(cornerRadius: 10).fill(Color(nsColor: .controlBackgroundColor).opacity(0.9))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10).stroke(Color(nsColor: .separatorColor).opacity(0.4), lineWidth: 1)
-                )
-                .frame(maxWidth: 280)
+        HStack(spacing: 12) {
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.secondary)
+                TextField("Search games", text: $appState.searchText)
+                    .textFieldStyle(.plain)
+                    .accessibilityLabel("Search games")
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(.ultraThinMaterial)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(Color.white.opacity(0.18), lineWidth: 1)
+            )
+            .frame(maxWidth: 280)
 
-                Picker("", selection: $appState.sortOrder) {
-                    ForEach(GameSortOrder.allCases) { order in
-                        Text(order.displayLabel).tag(order)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .fixedSize()
-                .labelsHidden()
+            SortSegmentedControl(selection: $appState.sortOrder)
+                .accessibilityLabel("Sort by")
 
-                Button {
-                    withAnimation(.spring(response: 0.35, dampingFraction: 0.7)) {
-                        appState.toggleSortDirection()
-                    }
-                } label: {
-                    Image(systemName: "chevron.up")
-                        .font(.system(size: 12, weight: .semibold))
-                        .rotationEffect(.degrees(appState.sortAscending ? 0 : 180))
-                        .frame(width: 24, height: 24)
+            Button {
+                withAnimation(.spring(response: 0.32, dampingFraction: 0.8)) {
+                    appState.toggleSortDirection()
                 }
-                .buttonStyle(.bordered)
-                .help(appState.sortOrder.directionHelp(ascending: appState.sortAscending))
+            } label: {
+                Image(systemName: "chevron.up")
+                    .font(.system(size: 12, weight: .semibold))
+                    .rotationEffect(.degrees(appState.sortAscending ? 0 : 180))
+                    .frame(width: 24, height: 24)
+            }
+            .buttonStyle(.plain)
+            .contentShape(Rectangle())
+            .animation(.spring(response: 0.32, dampingFraction: 0.8), value: appState.sortAscending)
+            .accessibilityLabel("Toggle sort direction")
+            .help(appState.sortOrder.directionHelp(ascending: appState.sortAscending))
 
-                Spacer()
+            Spacer()
 
-                if !appState.selectedAppIDs.isEmpty {
-                    Text("\(appState.selectedAppIDs.count) selected")
-                        .font(.caption.weight(.semibold))
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(Capsule().fill(Color.accentColor.opacity(0.2)))
-                        .transition(.scale.combined(with: .opacity))
-                }
-
-                Button {
-                    appState.showSettings = true
-                } label: {
-                    Image(systemName: "gearshape.fill")
-                }
-                .buttonStyle(.bordered)
-                .help("Settings")
+            if !appState.selectedAppIDs.isEmpty {
+                Text("\(appState.selectedAppIDs.count) selected")
+                    .font(.caption.weight(.semibold))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(Capsule().fill(Color.accentColor.opacity(0.30)))
+                    .overlay(Capsule().stroke(Color.white.opacity(0.22), lineWidth: 1))
             }
 
-            Text("Steam profile status can take a few seconds to update after start/stop.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            Button {
+                appState.showSettings = true
+            } label: {
+                Image(systemName: "gearshape.fill")
+            }
+            .buttonStyle(.bordered)
+            .accessibilityLabel("Settings")
+            .help("Settings")
         }
         .padding(12)
         .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(.ultraThinMaterial)
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(.ultraThinMaterial.opacity(0.93))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(Color.white.opacity(0.10), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .stroke(Color.white.opacity(0.15), lineWidth: 1)
         )
-        .animation(.spring(response: 0.3, dampingFraction: 0.85), value: appState.selectedAppIDs.count)
     }
 
-    private func sectionCard<Content: View>(title: String, subtitle: String, @ViewBuilder content: () -> Content) -> some View {
+    private func sectionCard<Content: View>(title: String, subtitle: String? = nil, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                     .font(.title3.bold())
-                Text(subtitle)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                if let subtitle, !subtitle.isEmpty {
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
 
             content()
         }
         .padding(16)
         .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(.ultraThinMaterial)
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(.ultraThinMaterial.opacity(0.93))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(Color.white.opacity(0.09), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .stroke(Color.white.opacity(0.15), lineWidth: 1)
         )
+        .shadow(color: .black.opacity(0.16), radius: 14, y: 6)
     }
 
     private var spotlightStrip: some View {
@@ -263,16 +264,15 @@ struct GameLibraryView: View {
                         game: game,
                         isIdling: appState.idleManager.activeAppIDs.contains(game.appid),
                         isLaunching: appState.launchingAppIDs.contains(game.appid),
-                        idleHoursLabel: appState.idleTimeStore.formattedHours(for: game.appid),
                         onPrimary: {
-                            if appState.idleManager.activeAppIDs.contains(game.appid) {
-                                appState.stopIdle(game: game)
-                            } else {
+                            if !appState.idleManager.activeAppIDs.contains(game.appid) &&
+                                !appState.launchingAppIDs.contains(game.appid) {
                                 appState.startIdle(game: game)
                             }
                         }
                     )
                     .frame(width: 230)
+                    .id(game.appid)
                 }
             }
             .padding(.vertical, 2)
@@ -283,9 +283,19 @@ struct GameLibraryView: View {
         LazyVGrid(columns: columns, spacing: LibraryGridMetrics.spacing) {
             ForEach(games) { game in
                 gameCard(for: game)
-                    .matchedGeometryEffect(id: game.appid, in: cardNamespace)
+                    .id(game.appid)
             }
         }
+        .transaction { transaction in
+            transaction.animation = nil
+        }
+        .animation(nil, value: appState.sortOrder)
+        .animation(nil, value: appState.sortAscending)
+        .animation(nil, value: appState.searchText)
+    }
+
+    private func refreshBackdropPalette() {
+        backdropPalette.refresh(activeSessions: appState.idleManager.activeSessions, games: appState.games)
     }
 
     private var utilityRail: some View {
@@ -301,13 +311,14 @@ struct GameLibraryView: View {
         }
         .padding(14)
         .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(.ultraThinMaterial)
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(.ultraThinMaterial.opacity(0.93))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(Color.white.opacity(0.09), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .stroke(Color.white.opacity(0.15), lineWidth: 1)
         )
+        .shadow(color: .black.opacity(0.16), radius: 14, y: 6)
     }
 
     private var compactUtilityPills: some View {
@@ -316,7 +327,6 @@ struct GameLibraryView: View {
             UtilityPill(text: "\(appState.selectedAppIDs.count) selected")
             UtilityPill(text: totalIdleHoursLabel)
         }
-        .transition(.move(edge: .bottom).combined(with: .opacity))
     }
 
     private var emptyState: some View {
@@ -324,9 +334,9 @@ struct GameLibraryView: View {
             Image(systemName: "gamecontroller")
                 .font(.largeTitle)
                 .foregroundStyle(.secondary)
-            Text("No games loaded")
+            Text("No games yet")
                 .font(.title3)
-            Text("Add your API key and refresh.")
+            Text("Add your API key in Settings.")
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -338,8 +348,7 @@ struct GameLibraryView: View {
             game: game,
             isSelected: appState.selectedAppIDs.contains(game.appid),
             isIdling: appState.idleManager.activeAppIDs.contains(game.appid),
-            isLaunching: appState.launchingAppIDs.contains(game.appid),
-            idleHoursLabel: appState.idleTimeStore.formattedHours(for: game.appid)
+            isLaunching: appState.launchingAppIDs.contains(game.appid)
         ) {
             withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) {
                 appState.toggleSelection(game)
@@ -363,27 +372,29 @@ struct GameLibraryView: View {
 
     private var spotlightGames: [Game] {
         let active = appState.idleManager.activeAppIDs
-        let sortedByRecent = appState.games.sorted { ($0.lastPlayedAt ?? 0) > ($1.lastPlayedAt ?? 0) }
-        let activeFirst = sortedByRecent.sorted { lhs, rhs in
+        // Single sort: active titles first, then by most-recently-played.
+        let sorted = appState.games.sorted { lhs, rhs in
             let la = active.contains(lhs.appid)
             let ra = active.contains(rhs.appid)
             if la != ra { return la && !ra }
             return (lhs.lastPlayedAt ?? 0) > (rhs.lastPlayedAt ?? 0)
         }
-        return Array(activeFirst.prefix(10))
+        return Array(sorted.prefix(10))
     }
 
     private var heroSubtitle: String {
         if appState.idleManager.activeSessions.isEmpty {
-            return "Ready to idle your next game."
+            return "Pick a game to start."
         }
-        return "\(appState.idleManager.activeSessions.count) game(s) currently idling."
+        return "\(appState.idleManager.activeSessions.count) idling now."
     }
 
     private var totalIdleHoursLabel: String {
-        let appids = Set(appState.games.map(\.appid)).union(appState.idleTimeStore.hoursByAppID.keys)
-        let total = appids.reduce(0.0) { partial, appid in
-            partial + appState.idleTimeStore.hours(for: appid)
+        // Sum stored hours plus any currently-active session deltas; no per-appid lookup
+        // against the full library so this stays cheap as the library grows.
+        var total = idleTimeStore.hoursByAppID.values.reduce(0, +)
+        for appid in appState.idleManager.activeAppIDs {
+            total += idleTimeStore.hours(for: appid) - (idleTimeStore.hoursByAppID[appid] ?? 0)
         }
         if total < 10 {
             return String(format: "%.1fh", total)
@@ -392,37 +403,18 @@ struct GameLibraryView: View {
     }
 }
 
-private struct DashboardBackground: View {
-    @State private var animate = false
+/// Subscribes only to `IdleTimeStore` so the parent library grid doesn't re-body
+/// every minute when the store ticks.
+struct IdleHoursLabel: View {
+    let appid: UInt64
+    @ObservedObject private var store = IdleTimeStore.shared
 
     var body: some View {
-        ZStack {
-            LinearGradient(
-                colors: [
-                    Color(red: 0.06, green: 0.08, blue: 0.12),
-                    Color(red: 0.08, green: 0.14, blue: 0.18)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .ignoresSafeArea()
-
-            Circle()
-                .fill(Color.blue.opacity(0.18))
-                .frame(width: 360, height: 360)
-                .blur(radius: 40)
-                .offset(x: animate ? 180 : -160, y: animate ? -130 : 140)
-
-            Circle()
-                .fill(Color.green.opacity(0.14))
-                .frame(width: 280, height: 280)
-                .blur(radius: 34)
-                .offset(x: animate ? -220 : 180, y: animate ? 130 : -140)
-        }
-        .onAppear {
-            withAnimation(.easeInOut(duration: 8).repeatForever(autoreverses: true)) {
-                animate = true
-            }
+        let label = store.formattedHours(for: appid)
+        if !label.isEmpty {
+            Text("(\(label))")
+                .font(.caption)
+                .foregroundStyle(.green.opacity(0.85))
         }
     }
 }
@@ -460,24 +452,63 @@ private struct UtilityPill: View {
     }
 }
 
+private struct SortSegmentedControl: View {
+    @Binding var selection: GameSortOrder
+    @Namespace private var highlightNamespace
+
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(GameSortOrder.allCases) { order in
+                Button {
+                    withAnimation(.spring(response: 0.32, dampingFraction: 0.8)) {
+                        selection = order
+                    }
+                } label: {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(Color.white.opacity(selection == order ? 0.001 : 0.08))
+
+                        if selection == order {
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .fill(Color.accentColor.opacity(0.9))
+                                .matchedGeometryEffect(id: "sortHighlight", in: highlightNamespace)
+                        }
+
+                        Text(order.displayLabel)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(selection == order ? Color.white : Color.secondary)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                    }
+                    .frame(minWidth: 100, minHeight: 32)
+                }
+                .buttonStyle(.plain)
+                .contentShape(Rectangle())
+            }
+        }
+        .padding(4)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(.ultraThinMaterial)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.white.opacity(0.16), lineWidth: 1)
+        )
+    }
+}
+
 private struct MiniSpotlightCard: View {
     let game: Game
     let isIdling: Bool
     let isLaunching: Bool
-    let idleHoursLabel: String
     let onPrimary: () -> Void
     @State private var hovering = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            AsyncImage(url: game.headerImageURL) { phase in
-                if case .success(let image) = phase {
-                    image
-                        .resizable()
-                        .aspectRatio(460.0 / 215.0, contentMode: .fill)
-                } else {
-                    Rectangle().fill(Color.gray.opacity(0.25))
-                }
+            CachedRemoteImage(url: game.headerImageURL, contentMode: .fill) {
+                Rectangle().fill(Color.gray.opacity(0.25))
             }
             .frame(height: 72)
             .clipShape(RoundedRectangle(cornerRadius: 8))
@@ -487,22 +518,33 @@ private struct MiniSpotlightCard: View {
                 .lineLimit(1)
                 .foregroundStyle(isIdling ? Color.green : Color.primary)
 
-            if !idleHoursLabel.isEmpty {
-                Text(idleHoursLabel)
-                    .font(.caption2)
+            IdleHoursLabel(appid: game.appid)
+
+            if isLaunching {
+                Label("Launching", systemImage: "hourglass")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .accessibilityLabel("Launching \(game.name)")
+            } else if isIdling {
+                Label("Idling", systemImage: "checkmark.circle.fill")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.green)
+            } else {
+                Label("Click to idle", systemImage: "play.fill")
+                    .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
             }
-
-            Button(isIdling ? "Stop" : (isLaunching ? "Launching..." : "Idle")) {
-                onPrimary()
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.small)
-            .disabled(isLaunching)
         }
         .padding(10)
         .background(
-            RoundedRectangle(cornerRadius: 12).fill(Color(nsColor: .controlBackgroundColor).opacity(0.92))
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [Color.white.opacity(0.12), Color.white.opacity(0.06)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
         )
         .overlay(
             RoundedRectangle(cornerRadius: 12)
@@ -511,7 +553,52 @@ private struct MiniSpotlightCard: View {
         .scaleEffect(hovering ? 1.02 : 1.0)
         .shadow(color: .black.opacity(hovering ? 0.18 : 0.08), radius: hovering ? 8 : 4, y: hovering ? 4 : 2)
         .onHover { hovering = $0 }
+        .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .onTapGesture {
+            if !isIdling && !isLaunching {
+                onPrimary()
+            }
+        }
         .animation(.spring(response: 0.28, dampingFraction: 0.78), value: hovering)
+    }
+}
+
+private struct AnimatedGreetingText: View {
+    let text: String
+    @State private var sweep = false
+
+    var body: some View {
+        Text(text)
+            .font(.system(size: 30, weight: .bold, design: .rounded))
+            .overlay {
+                GeometryReader { proxy in
+                    let width = max(proxy.size.width, 1)
+                    LinearGradient(
+                        colors: [
+                            Color.white.opacity(0.0),
+                            Color.white.opacity(0.24),
+                            Color.white.opacity(0.95),
+                            Color.white.opacity(0.24),
+                            Color.white.opacity(0.0)
+                        ],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                    .frame(width: width * 0.9)
+                    .offset(x: sweep ? width : -width)
+                }
+                .mask(
+                    Text(text)
+                        .font(.system(size: 30, weight: .bold, design: .rounded))
+                )
+                .allowsHitTesting(false)
+            }
+            .shadow(color: Color.white.opacity(0.24), radius: 8, x: 0, y: 0)
+            .onAppear {
+                withAnimation(.linear(duration: 4.0).repeatForever(autoreverses: false)) {
+                    sweep = true
+                }
+            }
     }
 }
 
@@ -575,7 +662,6 @@ struct GameCardView: View {
     let isSelected: Bool
     let isIdling: Bool
     let isLaunching: Bool
-    let idleHoursLabel: String
     let onToggleSelect: () -> Void
     let onStart: () -> Void
     let onStop: () -> Void
@@ -595,7 +681,6 @@ struct GameCardView: View {
                             .font(.title2)
                             .foregroundStyle(Color.accentColor, .white)
                             .padding(8)
-                            .transition(.scale.combined(with: .opacity))
                     }
                 }
 
@@ -605,18 +690,12 @@ struct GameCardView: View {
                     .foregroundStyle(isIdling ? Color.green : Color.primary)
                     .lineLimit(2)
                     .frame(height: 40, alignment: .topLeading)
-                    .animation(.easeInOut(duration: 0.2), value: isIdling)
 
                 Text(String(format: "%.1f hrs played", game.playtimeHours))
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
-                if !idleHoursLabel.isEmpty {
-                    Text("(\(idleHoursLabel))")
-                        .font(.caption)
-                        .foregroundStyle(.green.opacity(0.85))
-                        .transition(.opacity)
-                }
+                IdleHoursLabel(appid: game.appid)
             }
             .padding(.horizontal, 2)
 
@@ -626,15 +705,18 @@ struct GameCardView: View {
                     Label("Launching", systemImage: "hourglass")
                         .font(.caption.bold())
                         .foregroundStyle(.secondary)
+                        .accessibilityLabel("Launching \(game.name)")
                 } else if isIdling {
                     Button("Stop", role: .destructive, action: onStop)
                         .controlSize(.small)
                         .buttonStyle(.bordered)
                         .tint(.red)
+                        .accessibilityLabel("Stop idling \(game.name)")
                 } else {
                     Button("Idle", action: onStart)
                         .controlSize(.small)
                         .buttonStyle(.borderedProminent)
+                        .accessibilityLabel("Start idling \(game.name)")
                 }
             }
             .padding(.horizontal, 2)
@@ -642,8 +724,14 @@ struct GameCardView: View {
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .background(
-            RoundedRectangle(cornerRadius: 14)
-                .fill(Color(nsColor: .controlBackgroundColor).opacity(0.92))
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [Color.white.opacity(0.12), Color.white.opacity(0.05)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
         )
         .overlay(
             RoundedRectangle(cornerRadius: 14)
@@ -670,22 +758,16 @@ struct GameCardView: View {
             isHovered = hovering
         }
         .animation(.spring(response: 0.3, dampingFraction: 0.75), value: isHovered)
-        .animation(.spring(response: 0.25, dampingFraction: 0.8), value: isSelected)
-        .animation(.easeInOut(duration: 0.2), value: isIdling)
+        .animation(.spring(response: 0.3, dampingFraction: 0.82), value: isSelected)
+        .animation(.easeInOut(duration: 0.18), value: isIdling)
+        .animation(.easeInOut(duration: 0.18), value: isLaunching)
     }
 
     private var artwork: some View {
-        AsyncImage(url: game.headerImageURL) { phase in
-            switch phase {
-            case .success(let image):
-                image
-                    .resizable()
-                    .aspectRatio(imageAspect, contentMode: .fill)
-            default:
-                Rectangle()
-                    .fill(Color.gray.opacity(0.25))
-                    .aspectRatio(imageAspect, contentMode: .fit)
-            }
+        CachedRemoteImage(url: game.headerImageURL, contentMode: .fill) {
+            Rectangle()
+                .fill(Color.gray.opacity(0.25))
+                .aspectRatio(imageAspect, contentMode: .fit)
         }
         .aspectRatio(imageAspect, contentMode: .fit)
         .frame(maxWidth: .infinity)

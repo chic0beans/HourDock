@@ -41,27 +41,28 @@ final class AppState: ObservableObject {
     private let libraryService = SteamLibraryService()
     private var cancellables = Set<AnyCancellable>()
     private var snapshotSyncTask: Task<Void, Never>?
+    private var artworkWarmupTask: Task<Void, Never>?
     private var isBatchStartingIdle = false
+    private var lastProfileNetworkRefresh: Date?
+    private let greetingPrefix: String
 
     init() {
-        idleManager.objectWillChange
+        greetingPrefix = GreetingPhrases.all.randomElement() ?? "Hello"
+        idleManager.$activeSessions
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in
+            .sink { [weak self] sessions in
                 guard let self else { return }
                 self.objectWillChange.send()
-                self.idleTimeStore.syncActiveSessions(self.idleManager.activeAppIDs)
+                self.idleTimeStore.syncActiveSessions(Set(sessions.map(\.appid)))
                 if !self.isBatchStartingIdle {
                     self.scheduleSyncIdleSnapshot()
                 }
             }
             .store(in: &cancellables)
 
-        idleTimeStore.objectWillChange
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in
-                self?.objectWillChange.send()
-            }
-            .store(in: &cancellables)
+        // Intentionally do NOT forward idleTimeStore.objectWillChange here. The store
+        // ticks every 60 seconds, and re-publishing AppState would re-body the whole
+        // library. Views that show hours observe the store directly.
         idleTimeStore.syncActiveSessions(idleManager.activeAppIDs)
         syncIdleSnapshot()
     }
@@ -83,13 +84,13 @@ final class AppState: ObservableObject {
         launchingAppIDs.isEmpty
     }
 
-    var topPlaytimeGame: Game? {
-        games.max(by: { $0.playtimeForever < $1.playtimeForever })
-    }
-
     var greetingName: String {
         let trimmed = profileName.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? "Gamer" : trimmed
+    }
+
+    var greetingLine: String {
+        "\(greetingPrefix), \(greetingName)"
     }
 
     func toggleSortDirection() {
@@ -111,9 +112,21 @@ final class AppState: ObservableObject {
         if onboardingCompleted, !apiKey.isEmpty, !steamID64.isEmpty {
             Task {
                 await refreshLibrary(force: false)
-                await refreshProfile(force: false)
+                // Always hit the network on launch so name/avatar match Steam after profile edits.
+                await refreshProfileFromNetwork(minInterval: 0)
             }
         }
+    }
+
+    /// Fetches the latest Steam persona name and avatar. Use on launch and when the app
+    /// becomes active; `minInterval` skips redundant calls if we refreshed recently.
+    func refreshProfileFromNetwork(minInterval: TimeInterval = 30) async {
+        if let last = lastProfileNetworkRefresh,
+           Date().timeIntervalSince(last) < minInterval {
+            return
+        }
+        await refreshProfile(force: true)
+        lastProfileNetworkRefresh = Date()
     }
 
     func saveSettings() throws {
@@ -159,10 +172,12 @@ final class AppState: ObservableObject {
                 apiKey: key,
                 forceRefresh: force
             )
+            scheduleArtworkWarmup(force: force)
         } catch {
             if let cached = libraryService.loadCache(steamID: steamID64), !cached.isEmpty {
                 games = cached
                 errorMessage = "Using cached library: \(error.localizedDescription)"
+                scheduleArtworkWarmup(force: false)
             } else {
                 errorMessage = error.localizedDescription
             }
@@ -189,6 +204,11 @@ final class AppState: ObservableObject {
             if let cached = libraryService.loadProfileCache(steamID: steamID64) {
                 profileName = cached.personaName
                 profileAvatarURL = cached.avatarFullURL
+                if force {
+                    errorMessage = "Using cached profile: \(error.localizedDescription)"
+                }
+            } else if force {
+                errorMessage = error.localizedDescription
             }
         }
     }
@@ -229,46 +249,67 @@ final class AppState: ObservableObject {
             syncIdleSnapshot()
         }
 
+        let alreadyActive = idleManager.activeAppIDs
+        let candidates = selected.filter { !alreadyActive.contains($0.appid) }
+        let capacity = max(0, IdleProcessManager.maxConcurrent - idleManager.activeSessions.count)
+        guard capacity > 0 else {
+            errorMessage = IdleProcessError.maxSessionsReached.localizedDescription
+            return
+        }
+
         var failures: [String] = []
-        let targetGame = selected.first!
+        var started: [UInt64] = []
 
-        if !idleManager.activeSessions.isEmpty, !idleManager.activeAppIDs.contains(targetGame.appid) {
-            stopAllIdling()
-        }
-        if !idleManager.activeAppIDs.contains(targetGame.appid), !launchingAppIDs.contains(targetGame.appid) {
-            do {
-                launchingAppIDs.insert(targetGame.appid)
-                try await idleManager.startIdle(game: targetGame)
-                selectedAppIDs = [targetGame.appid]
-            } catch {
-                failures.append("\(targetGame.name): \(error.localizedDescription)")
+        for game in candidates.prefix(capacity) {
+            if launchingAppIDs.contains(game.appid) { continue }
+            _ = withAnimation(.easeInOut(duration: 0.15)) {
+                launchingAppIDs.insert(game.appid)
             }
-            launchingAppIDs.remove(targetGame.appid)
+            do {
+                try await idleManager.startIdle(game: game)
+                started.append(game.appid)
+            } catch {
+                failures.append("\(game.name): \(error.localizedDescription)")
+            }
+            _ = withAnimation(.easeInOut(duration: 0.15)) {
+                launchingAppIDs.remove(game.appid)
+            }
         }
 
+        // Clear selection for everything we just kicked off so the UI shows them in the
+        // "Idling" section rather than as still-selected.
+        for appid in started {
+            selectedAppIDs.remove(appid)
+        }
+        if candidates.count > capacity {
+            failures.append("Reached the \(IdleProcessManager.maxConcurrent)-game limit; \(candidates.count - capacity) skipped.")
+        }
         if !failures.isEmpty {
             errorMessage = failures.joined(separator: "\n")
-        } else if selected.count > 1 {
-            errorMessage = "Steam only reports one active game presence at a time. Started \(targetGame.name) only."
         }
     }
 
     func startIdle(game: Game) {
         if idleManager.activeAppIDs.contains(game.appid) { return }
         if launchingAppIDs.contains(game.appid) { return }
-        if !idleManager.activeSessions.isEmpty {
-            stopAllIdling()
+        if idleManager.activeSessions.count >= IdleProcessManager.maxConcurrent {
+            errorMessage = IdleProcessError.maxSessionsReached.localizedDescription
+            return
         }
 
+        _ = withAnimation(.easeInOut(duration: 0.15)) {
+            launchingAppIDs.insert(game.appid)
+        }
         Task {
             do {
-                launchingAppIDs.insert(game.appid)
                 try await idleManager.startIdle(game: game)
                 selectedAppIDs.remove(game.appid)
             } catch {
                 errorMessage = error.localizedDescription
             }
-            launchingAppIDs.remove(game.appid)
+            _ = withAnimation(.easeInOut(duration: 0.15)) {
+                launchingAppIDs.remove(game.appid)
+            }
         }
     }
 
@@ -307,5 +348,23 @@ final class AppState: ObservableObject {
             IdleSnapshotStore.save(sessions: idleManager.activeSessions, games: games)
         }
         WidgetCenter.shared.reloadAllTimelines()
+    }
+
+    private func scheduleArtworkWarmup(force: Bool) {
+        artworkWarmupTask?.cancel()
+        let currentGames = games
+        artworkWarmupTask = Task(priority: .utility) { @MainActor in
+            // Let profile/library UI paint first, then warm cache in background.
+            try? await Task.sleep(nanoseconds: 600_000_000)
+            guard !Task.isCancelled else { return }
+            if force {
+                RemoteImageCache.shared.clear()
+            }
+            let urls = currentGames.flatMap { game in
+                // Warm small/important assets first to keep profile + menu responsive.
+                [game.widgetIconURL, game.iconImageURL, game.headerImageURL].compactMap { $0 }
+            }
+            await RemoteImageCache.shared.prefetch(Array(urls.prefix(320)))
+        }
     }
 }

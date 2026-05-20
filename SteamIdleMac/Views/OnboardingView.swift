@@ -2,10 +2,14 @@ import SwiftUI
 
 struct OnboardingView: View {
     @EnvironmentObject private var appState: AppState
-    @State private var step: OnboardingStep = .welcome
     @State private var apiKeyInput: String = ""
     @State private var testStatus: TestStatus = .idle
-    @State private var pulse = false
+    @State private var validationTask: Task<Void, Never>?
+    @State private var finishTask: Task<Void, Never>?
+    @State private var previewGames: [Game] = []
+    @State private var previewIndex = 0
+    @State private var rotatePreview = false
+    @State private var previewRotationTask: Task<Void, Never>?
 
     enum TestStatus: Equatable {
         case idle
@@ -18,165 +22,235 @@ struct OnboardingView: View {
         ZStack {
             AnimatedBackground()
 
-            VStack(spacing: 0) {
-                header
-                ZStack {
-                    switch step {
-                    case .welcome:
-                        onboardingCard { welcomeStep }
-                            .transition(.move(edge: .leading).combined(with: .opacity))
-                    case .apiKey:
-                        onboardingCard { apiKeyStep }
-                            .transition(.asymmetric(
-                                insertion: .move(edge: .trailing).combined(with: .opacity),
-                                removal: .move(edge: .leading).combined(with: .opacity)
-                            ))
-                    case .stylePicker:
-                        onboardingCard { stylePickerStep }
-                            .transition(.move(edge: .trailing).combined(with: .opacity))
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    header
+                    sectionCard(title: "Steam API key", subtitle: "Load your library and profile") {
+                        apiKeySection
                     }
+                    sectionCard(title: "Banner style", subtitle: "Pick your floating idle look") {
+                        stylePickerSection
+                    }
+                    finishRow
+                        .padding(.horizontal, 2)
+                        .padding(.top, 4)
                 }
                 .padding(.horizontal, 36)
+                .padding(.top, 22)
                 .padding(.bottom, 28)
-                .animation(.spring(response: 0.45, dampingFraction: 0.82), value: step)
-            }
-            .padding(.top, 16)
-        }
-        .frame(minWidth: 760, minHeight: 560)
-        .onAppear { pulse = true }
-    }
-
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Steam Idle Mac Setup")
-                        .font(.title.bold())
-                    Text("Fast setup, smooth idling, done in 3 steps.")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-            }
-
-            HStack(spacing: 10) {
-                ForEach(OnboardingStep.allCases, id: \.rawValue) { s in
-                    Capsule()
-                        .fill(step.rawValue >= s.rawValue ? Color.accentColor : Color.white.opacity(0.18))
-                        .frame(height: 6)
-                        .scaleEffect(step.rawValue == s.rawValue && pulse ? 1.06 : 1.0)
-                        .animation(.spring(response: 0.35, dampingFraction: 0.7), value: step)
-                }
             }
         }
-        .padding(.horizontal, 36)
-        .padding(.bottom, 18)
-    }
-
-    private func onboardingCard<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
-        content()
-            .padding(26)
-            .background(
-                RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .fill(.ultraThinMaterial.opacity(0.94))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .stroke(Color.white.opacity(0.22), lineWidth: 1)
-            )
-            .shadow(color: .black.opacity(0.18), radius: 18, x: 0, y: 8)
-    }
-
-    private var welcomeStep: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            Text("Welcome to Steam Idle Mac")
-                .font(.largeTitle.bold())
-
-            Text("Idle multiple Steam games with lightweight helper processes without launching full games.")
-                .foregroundStyle(.secondary)
-
-            HStack(spacing: 12) {
-                FeatureTile(title: "Up to 32 games", symbol: "rectangle.3.group.fill")
-                FeatureTile(title: "Steam signed in", symbol: "person.crop.circle.badge.checkmark")
-                FeatureTile(title: "Safe choices", symbol: "shield.lefthalf.filled")
-            }
-
-            GroupBox {
-                VStack(alignment: .leading, spacing: 8) {
-                    Label("Avoid VAC-protected multiplayer games.", systemImage: "exclamationmark.triangle.fill")
-                    Label("You can tweak visual style later in Settings.", systemImage: "paintpalette.fill")
-                }
-                .font(.subheadline)
-            } label: {
-                Label("Quick notes", systemImage: "sparkles")
-                    .font(.headline)
-            }
-
-            Spacer(minLength: 0)
-            HStack {
-                Spacer()
-                Button("Get started") { step = .apiKey }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
-                    .keyboardShortcut(.defaultAction)
-            }
-        }
-    }
-
-    private var apiKeyStep: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            Text("Add your Steam Web API key")
-                .font(.title.bold())
-            Text("Used to load your owned games. Stored locally in macOS Keychain only.")
-                .foregroundStyle(.secondary)
-
-            HStack {
-                Link("Open Steam API key page", destination: URL(string: "https://steamcommunity.com/dev/apikey")!)
-                    .buttonStyle(.bordered)
-                Spacer()
-            }
-
-            SecureField("Paste API key here", text: $apiKeyInput)
-                .textFieldStyle(.roundedBorder)
-
-            HStack(spacing: 10) {
-                Button("Test key") { validateAPIKey() }
-                    .disabled(apiKeyInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                statusView
-                Spacer()
-            }
-            .padding(.top, 4)
-
-            Spacer(minLength: 0)
-            HStack {
-                Button("Back") { step = .welcome }
-                Spacer()
-                Button("Continue") {
-                    Task {
-                        try? appState.saveSettings()
-                        await appState.refreshLibrary(force: true)
-                        step = .stylePicker
-                    }
-                }
-                .buttonStyle(.borderedProminent)
-                .keyboardShortcut(.defaultAction)
-                .disabled({
-                    if case .success = testStatus { return false }
-                    return true
-                }())
-            }
-        }
+        .frame(minWidth: 840, minHeight: 620)
         .onAppear {
             apiKeyInput = appState.apiKey
             appState.apiKey = apiKeyInput
+            rebuildPreviewGames()
+            startPreviewRotation()
             let key = apiKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
             if !key.isEmpty {
                 validateAPIKey()
             }
         }
-        .onChange(of: apiKeyInput) { new in
-            appState.apiKey = new
-            testStatus = .idle
+        .onChange(of: appState.games) { _ in
+            rebuildPreviewGames()
+            startPreviewRotation()
+        }
+        .onDisappear {
+            validationTask?.cancel()
+            finishTask?.cancel()
+            previewRotationTask?.cancel()
+            rotatePreview = false
+        }
+    }
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            GlowingTitleText(text: "Setup")
+        }
+        .padding(.horizontal, 2)
+    }
+
+    private func sectionCard<Content: View>(title: String, subtitle: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.title3.bold())
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            content()
+        }
+        .padding(18)
+        .background(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(.ultraThinMaterial.opacity(0.93))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .stroke(Color.white.opacity(0.15), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.16), radius: 14, y: 6)
+    }
+
+    private var apiKeySection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if let url = AppLinks.steamAPIKey {
+                Link(destination: url) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "safari")
+                        Text("Open API key page")
+                    }
+                    .font(.subheadline.weight(.semibold))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(Capsule().fill(Color.white.opacity(0.12)))
+                }
+                .buttonStyle(.plain)
+            }
+
+            SecureField("Paste API key", text: $apiKeyInput)
+                .textFieldStyle(.plain)
+                .font(.system(.body, design: .monospaced))
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .background(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(.ultraThinMaterial)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(Color.white.opacity(0.16), lineWidth: 1)
+                )
+                .onChange(of: apiKeyInput) { new in
+                    appState.apiKey = new
+                    testStatus = .idle
+                }
+
+            HStack(spacing: 10) {
+                Button("Test key") { validateAPIKey() }
+                    .buttonStyle(.plain)
+                    .font(.subheadline.weight(.semibold))
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(Capsule().fill(Color.white.opacity(0.14)))
+                    .overlay(Capsule().stroke(Color.white.opacity(0.18), lineWidth: 1))
+                    .disabled(apiKeyInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                statusView
+                Spacer()
+            }
+        }
+    }
+
+    private var stylePickerSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if let game = currentPreviewGame {
+                HStack(spacing: 16) {
+                    ForEach(BannerStyle.allCases) { style in
+                        StylePreviewCard(
+                            game: game,
+                            style: style,
+                            selected: appState.bannerStyle == style
+                        ) {
+                            withAnimation(.spring(response: 0.35, dampingFraction: 0.72)) {
+                                appState.bannerStyle = style
+                            }
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                .animation(.easeInOut(duration: 0.22), value: previewIndex)
+            } else if appState.isLoadingLibrary {
+                ProgressView("Loading your library...")
+                    .frame(maxWidth: .infinity)
+            } else {
+                Text("Test your API key to load preview games.")
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var finishRow: some View {
+        HStack {
+            Spacer()
+            Button("Finish setup") { finishSetup() }
+                .buttonStyle(.plain)
+                .font(.headline.weight(.semibold))
+                .padding(.horizontal, 18)
+                .padding(.vertical, 10)
+                .background(Capsule().fill(Color.accentColor.opacity(0.9)))
+                .overlay(Capsule().stroke(Color.white.opacity(0.3), lineWidth: 1))
+                .disabled({
+                    if case .success = testStatus { return false }
+                    return true
+                }())
+                .keyboardShortcut(.defaultAction)
+        }
+    }
+
+    private var currentPreviewGame: Game? {
+        guard !previewGames.isEmpty else { return nil }
+        let index = max(0, min(previewIndex, previewGames.count - 1))
+        return previewGames[index]
+    }
+
+    private func rebuildPreviewGames() {
+        let source = appState.games.shuffled()
+        if source.isEmpty {
+            previewGames = []
+            previewIndex = 0
+            return
+        }
+        previewGames = Array(source.prefix(24))
+        previewIndex = 0
+    }
+
+    private func startPreviewRotation() {
+        rotatePreview = true
+        previewRotationTask?.cancel()
+        previewRotationTask = Task { @MainActor in
+            while rotatePreview {
+                try? await Task.sleep(nanoseconds: 500_000_000)
+                guard rotatePreview, !previewGames.isEmpty else { continue }
+                let nextIndex = (previewIndex + 1) % previewGames.count
+                let nextGame = previewGames[nextIndex]
+                let ready = await areAssetsReady(for: nextGame)
+                guard rotatePreview, !Task.isCancelled else { return }
+                guard ready else { continue }
+                withAnimation(.easeInOut(duration: 0.22)) {
+                    previewIndex = nextIndex
+                }
+            }
+        }
+    }
+
+    private func areAssetsReady(for game: Game?) async -> Bool {
+        guard let game else { return false }
+        guard let headerURL = game.headerImageURL else { return false }
+        let iconURL = game.widgetIconURL ?? game.iconImageURL
+        guard let iconURL else { return false }
+
+        var headerReady = RemoteImageCache.shared.image(for: headerURL) != nil
+        var iconReady = RemoteImageCache.shared.image(for: iconURL) != nil
+        if !headerReady {
+            headerReady = await RemoteImageCache.shared.load(headerURL) != nil
+        }
+        if !iconReady {
+            iconReady = await RemoteImageCache.shared.load(iconURL) != nil
+        }
+        return headerReady && iconReady
+    }
+
+    private func finishSetup() {
+        finishTask?.cancel()
+        finishTask = Task { @MainActor in
+            do {
+                try appState.saveSettings()
+                await appState.refreshLibrary(force: true)
+                appState.completeOnboarding()
+            } catch {
+                testStatus = .failure(error.localizedDescription)
+            }
         }
     }
 
@@ -192,9 +266,9 @@ struct OnboardingView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
         case .success(let count):
-            Label("\(count) games found", systemImage: "checkmark.circle.fill")
+            Label("\(count) games", systemImage: "checkmark.circle.fill")
                 .foregroundStyle(.green)
-                .font(.caption)
+                .font(.caption.weight(.semibold))
         case .failure(let msg):
             Label(msg, systemImage: "xmark.octagon.fill")
                 .foregroundStyle(.red)
@@ -206,11 +280,14 @@ struct OnboardingView: View {
     private func validateAPIKey() {
         let key = apiKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !key.isEmpty else { return }
+        validationTask?.cancel()
         testStatus = .testing
-        Task {
+        validationTask = Task { @MainActor in
             do {
                 try appState.saveSettings()
                 await appState.refreshLibrary(force: true)
+                guard !Task.isCancelled else { return }
+                rebuildPreviewGames()
                 if let err = appState.errorMessage, appState.games.isEmpty {
                     testStatus = .failure(err)
                     appState.errorMessage = nil
@@ -218,72 +295,48 @@ struct OnboardingView: View {
                     testStatus = .success(appState.games.count)
                 }
             } catch {
+                guard !Task.isCancelled else { return }
                 testStatus = .failure(error.localizedDescription)
-            }
-        }
-    }
-
-    private var stylePickerStep: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Choose your idle look")
-                .font(.title.bold())
-            Text("Pick the floating style used while a game is idling.")
-                .foregroundStyle(.secondary)
-
-            if let game = appState.topPlaytimeGame {
-                HStack(spacing: 22) {
-                    ForEach(BannerStyle.allCases) { style in
-                        StylePreviewCard(
-                            game: game,
-                            style: style,
-                            selected: appState.bannerStyle == style
-                        ) {
-                            withAnimation(.spring(response: 0.35, dampingFraction: 0.72)) {
-                                appState.bannerStyle = style
-                            }
-                        }
-                    }
-                }
-                .frame(maxWidth: .infinity)
-            } else if appState.isLoadingLibrary {
-                ProgressView("Loading your library...")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                Text("Couldn't load your games. Make sure your API key is correct.")
-                    .foregroundStyle(.red)
-            }
-
-            Spacer(minLength: 0)
-            HStack {
-                Button("Back") { step = .apiKey }
-                Spacer()
-                Button("Finish") {
-                    appState.completeOnboarding()
-                }
-                .buttonStyle(.borderedProminent)
-                .keyboardShortcut(.defaultAction)
             }
         }
     }
 }
 
-private struct FeatureTile: View {
-    let title: String
-    let symbol: String
+private struct GlowingTitleText: View {
+    let text: String
+    @State private var sweep = false
 
     var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: symbol)
-                .foregroundStyle(Color.accentColor)
-            Text(title)
-                .font(.subheadline.weight(.semibold))
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color.white.opacity(0.08))
-        )
+        Text(text)
+            .font(.system(size: 48, weight: .bold, design: .rounded))
+            .overlay {
+                GeometryReader { proxy in
+                    let width = max(proxy.size.width, 1)
+                    LinearGradient(
+                        colors: [
+                            Color.white.opacity(0.0),
+                            Color.white.opacity(0.20),
+                            Color.white.opacity(0.75),
+                            Color.white.opacity(0.20),
+                            Color.white.opacity(0.0)
+                        ],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                    .frame(width: width * 0.85)
+                    .offset(x: sweep ? width : -width * 0.9)
+                }
+                .mask(
+                    Text(text)
+                        .font(.system(size: 48, weight: .bold, design: .rounded))
+                )
+                .allowsHitTesting(false)
+            }
+            .onAppear {
+                withAnimation(.linear(duration: 3.6).repeatForever(autoreverses: false)) {
+                    sweep = true
+                }
+            }
     }
 }
 
@@ -335,18 +388,27 @@ private struct StylePreviewCard: View {
                     .frame(width: 280, height: 200)
                 Text(style.displayName)
                     .font(.subheadline.bold())
+                    .foregroundStyle(selected ? Color.white : Color.primary)
             }
             .padding(12)
             .frame(width: 320)
             .background(
-                RoundedRectangle(cornerRadius: 16)
-                    .fill(selected ? Color.accentColor.opacity(0.18) : Color(nsColor: .controlBackgroundColor).opacity(0.9))
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: selected
+                                ? [Color.accentColor.opacity(0.34), Color.purple.opacity(0.24)]
+                                : [Color.white.opacity(0.10), Color.white.opacity(0.05)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 16)
-                    .stroke(selected ? Color.accentColor : Color.secondary.opacity(0.35), lineWidth: 2)
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(selected ? Color.accentColor.opacity(0.95) : Color.white.opacity(0.20), lineWidth: selected ? 2 : 1)
             )
-            .shadow(color: .black.opacity(hovering ? 0.22 : 0.08), radius: hovering ? 14 : 6, y: hovering ? 6 : 3)
+            .shadow(color: .black.opacity(hovering ? 0.22 : 0.09), radius: hovering ? 14 : 7, y: hovering ? 6 : 3)
             .scaleEffect(hovering ? 1.02 : 1)
         }
         .buttonStyle(.plain)

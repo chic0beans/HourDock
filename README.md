@@ -16,7 +16,7 @@ HourDock is a native macOS app for idling your Steam library and tracking hours 
 1. Open the releases page: [HourDock Releases](https://github.com/chic0beans/HourDock/releases)
 2. Download `HourDock.dmg`
 3. Drag `HourDock.app` to `Applications`
-4. Launch the app (if macOS warns on first run, right-click -> Open)
+4. Launch the app
 
 ## Quick Start
 
